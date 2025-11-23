@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Герой-Фермер: Grand Economy</title>
+    <title>Герой-Фермер: Optimized</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
         @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -17,7 +17,7 @@
             user-select: none;
         }
 
-        canvas { display: block; cursor: crosshair; }
+        canvas { display: block; }
 
         /* UI */
         #ui-layer {
@@ -132,21 +132,25 @@
             font-size: 20px; font-weight: bold; text-shadow: 2px 2px 0 #000;
             pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 100;
         }
+
+        #fps-meter {
+            position: absolute; top: 5px; right: 5px; color: #0f0; font-size: 10px; pointer-events: none;
+        }
     </style>
 </head>
 <body>
 
     <canvas id="gameCanvas"></canvas>
+    <div id="fps-meter">FPS: 60</div>
 
     <!-- MENU -->
     <div id="main-menu">
         <h1>🌍 ГЕРОЙ-ФЕРМЕР</h1>
-        <h2 style="color:#2ecc71; font-size:14px;">ULTIMATE ECONOMY</h2>
+        <h2 style="color:#2ecc71; font-size:14px;">TURBO EDITION ⚡</h2>
         <div style="font-size:10px; max-width: 600px; line-height:1.5; color:#ccc; margin-bottom:20px;">
-            ЭКОНОМИКА ЖИВАЯ: Чем больше вы покупаете семена, тем они ДОРОЖЕ.<br>
-            Чем больше продаете урожай, тем он ДЕШЕВЛЕ.<br>
-            Разнообразие — ключ к успеху!<br>
-            Осторожно: Волки голодны.
+            ОПТИМИЗИРОВАНО ДЛЯ FULLSCREEN.<br>
+            Экономика живая, мир огромный.<br>
+            Удачи, фермер!
         </div>
         <button class="menu-btn" onclick="game.startGame()">НАЧАТЬ</button>
     </div>
@@ -160,7 +164,6 @@
             <div class="section-title">🎒 Рука (Q)</div>
             <div id="active-tool" style="text-align: center; font-size: 24px; margin-bottom:5px;"></div>
             <div style="text-align: center;">Семян: <span id="seed-count" style="color:#2ecc71">0</span></div>
-            <div style="text-align: center; font-size:8px; color:#aaa; margin-top:2px;">Цена покупки растет!</div>
         </div>
         <div class="hud-panel">
             <div class="section-title">📦 Урожай</div>
@@ -188,72 +191,49 @@
 
 <script>
 
-/* --- 50+ КУЛЬТУР --- */
-// Base Price: Базовая цена семени
-// Growth: Время роста (мс)
-// Value Multiplier: Во сколько раз продажа дороже базы (до инфляции)
-// Все цены стартуют низко, но растут от спроса!
+/* --- ДАННЫЕ ИГРЫ --- */
 const CROPS = {
-    // TIER 1: Стартовые (Быстрые, дешевые)
+    // TIER 1
     wheat: { n:'Пшеница', i:'🌾', p:5, m:2.0, t:3000 },
     clover: { n:'Клевер', i:'☘️', p:6, m:2.1, t:3500 },
     rice: { n:'Рис', i:'🍚', p:7, m:2.2, t:4000 },
     grass: { n:'Трава', i:'🌿', p:4, m:1.8, t:2000 },
-
-    // TIER 2: Простые овощи
+    // TIER 2
     carrot: { n:'Морковь', i:'🥕', p:15, m:2.5, t:6000 },
     potato: { n:'Картофель', i:'🥔', p:18, m:2.6, t:7000 },
     cucumber: { n:'Огурец', i:'🥒', p:20, m:2.7, t:7500 },
     onion: { n:'Лук', i:'🧅', p:22, m:2.8, t:8000 },
-    garlic: { n:'Чеснок', i:'🧄', p:25, m:3.0, t:8500 },
     corn: { n:'Кукуруза', i:'🌽', p:30, m:3.2, t:10000 },
-
-    // TIER 3: Зелень и Специи
+    // TIER 3
     broccoli: { n:'Брокколи', i:'🥦', p:35, m:3.3, t:11000 },
     salad: { n:'Салат', i:'🥬', p:32, m:3.1, t:10500 },
     pepper: { n:'Перец', i:'🌶️', p:40, m:3.5, t:12000 },
-    bellpepper: { n:'Паприка', i:'🫑', p:45, m:3.6, t:13000 },
-    herb: { n:'Травы', i:'🍃', p:28, m:2.9, t:9000 },
-
-    // TIER 4: Корнеплоды и прочее
-    beet: { n:'Свекла', i:'🟥', p:50, m:3.7, t:14000 }, // Используем квадрат как заглушку цвета
+    // TIER 4
+    beet: { n:'Свекла', i:'🟥', p:50, m:3.7, t:14000 },
     sweetpotato: { n:'Батат', i:'🍠', p:55, m:3.8, t:15000 },
-    peanut: { n:'Арахис', i:'🥜', p:60, m:4.0, t:16000 },
-    bean: { n:'Фасоль', i:'🫘', p:65, m:4.1, t:17000 },
-
-    // TIER 5: Ягоды и простые фрукты
+    // TIER 5
     tomato: { n:'Томат', i:'🍅', p:70, m:4.2, t:18000 },
     eggplant: { n:'Баклажан', i:'🍆', p:75, m:4.3, t:19000 },
     strawberry: { n:'Клубника', i:'🍓', p:80, m:4.5, t:20000 },
-    cherry: { n:'Вишня', i:'🍒', p:85, m:4.6, t:21000 },
-    blueberry: { n:'Черника', i:'🫐', p:90, m:4.7, t:22000 },
-
-    // TIER 6: Фрукты (Долгие, дорогие)
+    // TIER 6
     grapes: { n:'Виноград', i:'🍇', p:100, m:5.0, t:25000 },
     melon: { n:'Дыня', i:'🍈', p:110, m:5.2, t:27000 },
     watermelon: { n:'Арбуз', i:'🍉', p:120, m:5.5, t:30000 },
-    tangerine: { n:'Мандарин', i:'🍊', p:130, m:5.7, t:32000 },
     lemon: { n:'Лимон', i:'🍋', p:140, m:6.0, t:35000 },
     banana: { n:'Банан', i:'🍌', p:150, m:6.2, t:37000 },
     pineapple: { n:'Ананас', i:'🍍', p:160, m:6.5, t:40000 },
-
-    // TIER 7: Экзотика
+    // TIER 7
     mango: { n:'Манго', i:'🥭', p:200, m:7.0, t:45000 },
     apple: { n:'Яблоко', i:'🍎', p:180, m:6.8, t:42000 },
     greenapple: { n:'Яблоко З.', i:'🍏', p:185, m:6.9, t:43000 },
-    pear: { n:'Груша', i:'🍐', p:190, m:7.0, t:44000 },
-    peach: { n:'Персик', i:'🍑', p:210, m:7.2, t:47000 },
     kiwi: { n:'Киви', i:'🥝', p:220, m:7.5, t:50000 },
     coconut: { n:'Кокос', i:'🥥', p:250, m:8.0, t:55000 },
-
-    // TIER 8: Элита
+    // TIER 8
     mushroom: { n:'Гриб', i:'🍄', p:300, m:9.0, t:60000 },
     chestnut: { n:'Каштан', i:'🌰', p:320, m:9.5, t:65000 },
     avocado: { n:'Авокадо', i:'🥑', p:350, m:10.0, t:70000 },
-    olive: { n:'Оливка', i:'🫒', p:380, m:10.5, t:75000 },
     pumpkin: { n:'Тыква', i:'🎃', p:400, m:11.0, t:80000 },
-
-    // TIER 9: Сокровища
+    // TIER 9
     bamboo: { n:'Бамбук', i:'🎍', p:500, m:12.0, t:90000 },
     hibiscus: { n:'Гибискус', i:'🌺', p:600, m:13.0, t:100000 },
     sunflower: { n:'Подсолнух', i:'🌻', p:700, m:14.0, t:110000 },
@@ -262,9 +242,30 @@ const CROPS = {
 };
 
 const CROP_KEYS = Object.keys(CROPS);
-const EMOJIS = { hero: '🤠', shop: '🏪', ground: '#2ecc71', soil: '#5d4037', sprout: '🌱' };
 
-/* --- КЛАССЫ --- */
+/* --- СИСТЕМА КЭШИРОВАНИЯ СПРАЙТОВ (ГЛАВНАЯ ОПТИМИЗАЦИЯ) --- */
+const spriteCache = {};
+
+function getSprite(emoji, size) {
+    // Создаем уникальный ключ для эмодзи и размера
+    const key = emoji + '_' + size;
+    if (spriteCache[key]) return spriteCache[key];
+
+    // Если нет в кэше, рисуем один раз на маленьком канвасе
+    const canvas = document.createElement('canvas');
+    const padding = size * 0.5; // Запас, чтобы не обрезать края
+    canvas.width = size + padding;
+    canvas.height = size + padding;
+    const ctx = canvas.getContext('2d');
+
+    ctx.font = `${size}px serif`; // Используем стандартный шрифт для скорости
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(emoji, canvas.width/2, canvas.height/2);
+
+    spriteCache[key] = canvas;
+    return canvas;
+}
 
 class Animal {
     constructor(type, x, y) {
@@ -273,7 +274,6 @@ class Animal {
         this.size = type === 'wolf' ? 45 : (type === 'cow' ? 50 : 35);
         this.vx = 0; this.vy = 0;
 
-        // Emojis
         if(type==='wolf') this.emoji = '🐺';
         else if(type==='pig') this.emoji = '🐖';
         else if(type==='cow') this.emoji = '🐄';
@@ -281,29 +281,31 @@ class Animal {
 
         this.target = null;
         this.dead = false;
-        this.deathTimer = 0;
     }
 
     update(animals, game) {
         if (this.dead) return;
-
-        // Random wander
         if (Math.random() < 0.02) {
             this.vx = (Math.random() - 0.5) * 1.5;
             this.vy = (Math.random() - 0.5) * 1.5;
         }
 
-        // --- ЛОГИКА ВОЛКА ---
         if (this.type === 'wolf') {
             if (!this.target || this.target.dead) {
                 let minDist = 500;
                 let potential = null;
-                animals.forEach(a => {
+                // Простой перебор
+                for (let a of animals) {
                     if (a !== this && a.type !== 'wolf' && !a.dead) {
-                        let d = Math.hypot(a.x - this.x, a.y - this.y);
-                        if (d < minDist) { minDist = d; potential = a; }
+                        let dx = a.x - this.x;
+                        let dy = a.y - this.y;
+                        // Быстрая проверка дистанции (без корня для оптимизации где возможно)
+                        if (Math.abs(dx) < 500 && Math.abs(dy) < 500) {
+                            let d = Math.hypot(dx, dy);
+                            if (d < minDist) { minDist = d; potential = a; }
+                        }
                     }
-                });
+                }
                 this.target = potential;
             }
 
@@ -312,98 +314,83 @@ class Animal {
                 let dy = this.target.y - this.y;
                 let dist = Math.hypot(dx, dy);
 
-                // АТАКА
                 if (dist < 20) {
-                    this.target.die(game); // УБИЙСТВО
+                    this.target.die(game);
                     this.target = null;
                 } else {
-                    this.vx = (dx / dist) * 2.8; // Волк довольно быстр
+                    this.vx = (dx / dist) * 2.8;
                     this.vy = (dy / dist) * 2.8;
                 }
             }
         } else {
-            // --- ЛОГИКА ЖЕРТВЫ ---
-            // Убегать от волка
-            let closestWolf = null;
-            let minDist = 250;
-            animals.forEach(a => {
+            // Убегание
+            // Оптимизация: не проверяем всех волков, только если они рядом
+            let panic = false;
+            for (let a of animals) {
                 if (a.type === 'wolf') {
-                    let d = Math.hypot(a.x - this.x, a.y - this.y);
-                    if (d < minDist) { minDist = d; closestWolf = a; }
+                     let dx = this.x - a.x;
+                     let dy = this.y - a.y;
+                     if (Math.abs(dx) < 250 && Math.abs(dy) < 250) { // AABB pre-check
+                         let d = Math.hypot(dx, dy);
+                         if (d < 250) {
+                             this.vx = (dx / d) * 3.5;
+                             this.vy = (dy / d) * 3.5;
+                             panic = true;
+                             break;
+                         }
+                     }
                 }
-            });
-
-            if (closestWolf) {
-                let dx = this.x - closestWolf.x;
-                let dy = this.y - closestWolf.y;
-                let dist = Math.hypot(dx, dy);
-                // Жертва бежит чуть быстрее волка в рывке (шанс спастись)
-                this.vx = (dx / dist) * 3.5;
-                this.vy = (dy / dist) * 3.5;
             }
         }
 
         this.x += this.vx;
         this.y += this.vy;
-
-        // Границы
-        this.x = Math.max(20, Math.min(this.x, 2500 - 20));
-        this.y = Math.max(20, Math.min(this.y, 2000 - 20));
+        this.x = Math.max(20, Math.min(this.x, 2480));
+        this.y = Math.max(20, Math.min(this.y, 1980));
     }
 
     die(game) {
         this.dead = true;
         this.emoji = '💀';
         game.popup("Кто-то был съеден...", '#e74c3c');
-
-        // Респаун через 3 секунды
-        setTimeout(() => {
-            game.respawnAnimal(this.type);
-        }, 3000);
+        setTimeout(() => game.respawnAnimal(this.type), 3000);
     }
 }
 
 class Game {
     constructor() {
         this.canvas = document.getElementById('gameCanvas');
-        this.ctx = this.canvas.getContext('2d');
+        this.ctx = this.canvas.getContext('2d', { alpha: false }); // Отключаем прозрачность фона для скорости
+
+        // Инициализируем камеру ПЕРЕД resize, так как resize использует this.camera
+        this.camera = { x: 0, y: 0, w: 0, h: 0 };
+
         this.resize();
 
         this.running = false;
-        this.money = 150; // Чуть больше денег на старт для экспериментов
+        this.money = 150;
         this.fields = [];
         this.animals = [];
         this.flora = [];
 
-        // Инвентарь
         this.seeds = {};
         this.inventory = {};
-
-        // --- ЭКОНОМИКА ---
-        // Сколько раз купили (повышает цену)
         this.boughtCounts = {};
-        // Сколько раз продали (понижает цену продажи)
         this.soldCounts = {};
 
         CROP_KEYS.forEach(k => {
-            this.seeds[k] = 0;
-            this.inventory[k] = 0;
-            this.boughtCounts[k] = 0;
-            this.soldCounts[k] = 0;
+            this.seeds[k] = 0; this.inventory[k] = 0;
+            this.boughtCounts[k] = 0; this.soldCounts[k] = 0;
         });
 
-        // Стартовый набор
         this.seeds['wheat'] = 5;
 
         this.player = { x: 1250, y: 1000, seedIdx: 0 };
-        this.camera = { x: 0, y: 0 };
         this.shop = { x: 1150, y: 800, open: false, tab: 'buy' };
 
-        // Инициализация мира
         this.addField(this.player.x - 30, this.player.y + 60);
         this.generateWorld();
 
-        // Input
         this.keys = {};
         window.onkeydown = e => {
             this.keys[e.code] = true;
@@ -416,39 +403,34 @@ class Game {
         window.onkeyup = e => this.keys[e.code] = false;
         window.onresize = () => this.resize();
 
+        // FPS counter
+        this.frameCount = 0;
+        this.lastTime = 0;
+
         this.updateUI();
-        this.loop();
+        this.loop(0);
     }
 
     generateWorld() {
-        // Растения
         for(let i=0; i<400; i++) {
             let type = Math.random()>0.5 ? ['🌲','🌳','🌴'] : ['🌻','🌷','🌹','🌼'];
             let em = type[Math.floor(Math.random()*type.length)];
             this.flora.push({ e: em, x: Math.random()*2500, y: Math.random()*2000, s: 40+Math.random()*40 });
         }
-        // Животные
         for(let i=0; i<20; i++) this.animals.push(new Animal('pig', Math.random()*2500, Math.random()*2000));
         for(let i=0; i<20; i++) this.animals.push(new Animal('chicken', Math.random()*2500, Math.random()*2000));
         for(let i=0; i<10; i++) this.animals.push(new Animal('cow', Math.random()*2500, Math.random()*2000));
         for(let i=0; i<6; i++) this.animals.push(new Animal('wolf', Math.random()*2500, Math.random()*2000));
-
-        // Очистка спавна
         this.flora = this.flora.filter(f => Math.hypot(f.x - this.player.x, f.y - this.player.y) > 300);
     }
 
     respawnAnimal(type) {
-        // Спавним далеко от игрока
         let x, y, d;
         do {
-            x = Math.random() * 2500;
-            y = Math.random() * 2000;
+            x = Math.random() * 2500; y = Math.random() * 2000;
             d = Math.hypot(x - this.player.x, y - this.player.y);
-        } while (d < 800); // Минимум 800 пикселей от игрока
-
-        // Удаляем трупы этого типа (очистка массива)
+        } while (d < 800);
         this.animals = this.animals.filter(a => !(a.type === type && a.dead));
-        // Добавляем нового
         this.animals.push(new Animal(type, x, y));
     }
 
@@ -467,23 +449,21 @@ class Game {
     resize() {
         this.canvas.width = window.innerWidth;
         this.canvas.height = window.innerHeight;
+        this.camera.w = this.canvas.width;
+        this.camera.h = this.canvas.height;
     }
 
     // --- ЭКОНОМИКА ---
-
-    // Цена покупки растет на 5% за каждую покупку этого вида
     getBuyPrice(k) {
         let base = CROPS[k].p;
         let inflation = 1 + (this.boughtCounts[k] * 0.05);
         return Math.floor(base * inflation);
     }
-
-    // Цена продажи падает на 2% за каждую продажу (дефляция спроса)
     getSellPrice(k) {
         let base = Math.floor(CROPS[k].p * CROPS[k].m);
         let saturation = 1 + (this.soldCounts[k] * 0.02);
         let price = Math.floor(base / saturation);
-        return Math.max(1, price); // Минимум 1 монета
+        return Math.max(1, price);
     }
 
     buySeed(k) {
@@ -491,7 +471,7 @@ class Game {
         if (this.money >= p) {
             this.money -= p;
             this.seeds[k]++;
-            this.boughtCounts[k]++; // Инфляция!
+            this.boughtCounts[k]++;
             this.updateShop();
             this.updateUI();
         } else {
@@ -506,20 +486,17 @@ class Game {
             let total = count * unitPrice;
             this.money += total;
             this.inventory[k] = 0;
-            this.soldCounts[k] += count; // Рынок насыщается, цена падает
+            this.soldCounts[k] += count;
             this.popup(`Продано за ${total}`, '#f1c40f');
             this.updateShop();
             this.updateUI();
         }
     }
 
-    // --- GAMEPLAY ---
-
     addField(x, y) {
         let tiles = [];
         for(let i=0; i<2; i++) for(let j=0; j<3; j++) tiles.push({ rx:i, ry:j, c:null });
         this.fields.push({ x, y, w:2, h:3, tiles });
-        // Рубка деревьев
         this.flora = this.flora.filter(f => !(f.x > x && f.x < x+120 && f.y > y && f.y < y+180));
     }
 
@@ -544,19 +521,17 @@ class Game {
     interactField() {
         if(this.shop.open) return;
         let px = this.player.x; let py = this.player.y;
-
         for(let f of this.fields) {
+            if(px < f.x || px > f.x+120 || py < f.y || py > f.y+180) continue; // Быстрая проверка
             for(let t of f.tiles) {
                 let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
                 if(px > tx && px < tx+60 && py > ty && py < ty+60) {
                     if(t.c && t.c.r) {
-                        // Сбор
                         this.inventory[t.c.k]++;
                         this.popup(`+1 ${CROPS[t.c.k].i}`, '#2ecc71');
                         t.c = null;
                         this.updateUI();
                     } else if(!t.c) {
-                        // Посадка
                         let k = CROP_KEYS[this.player.seedIdx];
                         if(this.seeds[k] > 0) {
                             this.seeds[k]--;
@@ -565,16 +540,22 @@ class Game {
                             this.updateUI();
                         } else this.popup("Нет семян!", '#e74c3c');
                     }
+                    return;
                 }
             }
         }
     }
 
-    // --- UPDATE & DRAW ---
+    loop(timestamp) {
+        // FPS counter
+        if (timestamp - this.lastTime >= 1000) {
+            document.getElementById('fps-meter').innerText = `FPS: ${this.frameCount}`;
+            this.frameCount = 0;
+            this.lastTime = timestamp;
+        }
+        this.frameCount++;
 
-    loop() {
         if(this.running) {
-            // Player Move
             let speed = 6;
             if(this.keys['KeyW'] || this.keys['ArrowUp']) this.player.y -= speed;
             if(this.keys['KeyS'] || this.keys['ArrowDown']) this.player.y += speed;
@@ -583,98 +564,133 @@ class Game {
             this.player.x = Math.max(0, Math.min(this.player.x, 2500));
             this.player.y = Math.max(0, Math.min(this.player.y, 2000));
 
-            // Camera
+            // Camera follow
             this.camera.x = Math.max(0, Math.min(this.player.x - this.canvas.width/2, 2500 - this.canvas.width));
             this.camera.y = Math.max(0, Math.min(this.player.y - this.canvas.height/2, 2000 - this.canvas.height));
 
-            // Crops
             let now = Date.now();
             this.fields.forEach(f => f.tiles.forEach(t => {
                 if(t.c && !t.c.r && now - t.c.start > CROPS[t.c.k].t) t.c.r = true;
             }));
 
-            // Animals
             this.animals.forEach(a => a.update(this.animals, this));
-            // Удаляем "окончательно мертвых" (чье время анимации смерти вышло), хотя респаун делает это тоже
         }
 
         this.draw();
-        requestAnimationFrame(() => this.loop());
+        requestAnimationFrame(t => this.loop(t));
     }
 
+    // ОПТИМИЗИРОВАННЫЙ ОТРИСОВЩИК
     draw() {
+        // 1. Заливка сплошным цветом (быстро)
         this.ctx.fillStyle = '#2ecc71';
         this.ctx.fillRect(0,0,this.canvas.width, this.canvas.height);
-        this.ctx.save();
-        this.ctx.translate(-this.camera.x, -this.camera.y);
 
-        // Граница
-        this.ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-        this.ctx.lineWidth = 10;
-        this.ctx.strokeRect(0,0,2500,2000);
+        // Сдвиг камеры
+        const cx = this.camera.x;
+        const cy = this.camera.y;
+        const cw = this.camera.w;
+        const ch = this.camera.h;
+
+        // Рисуем только то, что видим (CULLING) + Спрайты (CACHING)
+
+        // Границы мира (если в кадре)
+        if (cx < 10 || cy < 10 || cx > 2490 - cw || cy > 1990 - ch) {
+            this.ctx.save();
+            this.ctx.translate(-cx, -cy);
+            this.ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            this.ctx.lineWidth = 10;
+            this.ctx.strokeRect(0,0,2500,2000);
+            this.ctx.restore();
+        }
 
         // Флора
-        this.flora.forEach(f => {
-            this.ctx.font = `${f.s}px serif`;
-            this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
-            this.ctx.fillText(f.e, f.x, f.y);
-        });
+        for (let f of this.flora) {
+            // Culling
+            if (f.x + 50 < cx || f.x - 50 > cx + cw || f.y + 50 < cy || f.y - 50 > cy + ch) continue;
+            // Draw cached sprite
+            let s = getSprite(f.e, Math.floor(f.s));
+            this.ctx.drawImage(s, f.x - s.width/2 - cx, f.y - s.height/2 - cy);
+        }
 
         // Поля
-        this.fields.forEach(f => {
+        for (let f of this.fields) {
+            if (f.x + 150 < cx || f.x - 30 > cx + cw || f.y + 200 < cy || f.y - 30 > cy + ch) continue;
+
+            let screenX = f.x - cx;
+            let screenY = f.y - cy;
+
             this.ctx.fillStyle = '#5d4037';
-            this.ctx.fillRect(f.x, f.y, 120, 180);
+            this.ctx.fillRect(screenX, screenY, 120, 180);
             this.ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-            this.ctx.strokeRect(f.x, f.y, 120, 180);
-            f.tiles.forEach(t => {
-                let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
+            this.ctx.strokeRect(screenX, screenY, 120, 180);
+
+            for (let t of f.tiles) {
+                let tx = screenX + t.rx * 60;
+                let ty = screenY + t.ry * 60;
                 this.ctx.strokeRect(tx, ty, 60, 60);
+
                 if(t.c) {
                     let icon = t.c.r ? CROPS[t.c.k].i : '🌱';
                     let size = t.c.r ? 40 : 25;
-                    let bounce = t.c.r && this.running ? Math.sin(Date.now()/300)*3 : 0;
-                    this.ctx.font = `${size}px serif`;
-                    this.ctx.fillText(icon, tx+30, ty+30+bounce);
+                    // Анимацию считаем только для видимых
+                    let bounce = (t.c.r && this.running) ? Math.sin(Date.now()/300)*3 : 0;
+
+                    let s = getSprite(icon, size);
+                    this.ctx.drawImage(s, tx + 30 - s.width/2, ty + 30 - s.height/2 + bounce);
                 }
-            });
-        });
+            }
+        }
 
         // Магазин
-        this.ctx.font = '80px serif';
-        this.ctx.fillText('🏪', this.shop.x, this.shop.y);
-        this.ctx.fillStyle='white'; this.ctx.font='12px sans-serif';
-        this.ctx.fillText('МАГАЗИН', this.shop.x, this.shop.y-50);
+        if (this.shop.x + 100 > cx && this.shop.x - 100 < cx + cw && this.shop.y + 100 > cy && this.shop.y - 100 < cy + ch) {
+            let s = getSprite('🏪', 80);
+            this.ctx.drawImage(s, this.shop.x - s.width/2 - cx, this.shop.y - s.height/2 - cy);
+            this.ctx.fillStyle='white'; this.ctx.font='12px sans-serif'; this.ctx.textAlign='center';
+            this.ctx.fillText('МАГАЗИН', this.shop.x - cx, this.shop.y - 50 - cy);
+        }
 
         // Животные
-        this.animals.forEach(a => {
+        for (let a of this.animals) {
+            if (a.x + 60 < cx || a.x - 60 > cx + cw || a.y + 60 < cy || a.y - 60 > cy + ch) continue;
+
             let jump = this.running && !a.dead ? Math.abs(Math.sin(Date.now()/200 + a.x))*5 : 0;
-            this.ctx.font = `${a.size}px serif`;
-            this.ctx.save();
-            this.ctx.translate(a.x, a.y - jump);
-            if(a.vx < 0) this.ctx.scale(-1, 1);
-            this.ctx.fillText(a.emoji, 0, 0);
-            this.ctx.restore();
-        });
+            let s = getSprite(a.emoji, a.size);
+
+            let drawX = a.x - cx;
+            let drawY = a.y - jump - cy;
+
+            if (a.vx < 0) {
+                this.ctx.save();
+                this.ctx.translate(drawX, drawY);
+                this.ctx.scale(-1, 1);
+                this.ctx.drawImage(s, -s.width/2, -s.height/2);
+                this.ctx.restore();
+            } else {
+                this.ctx.drawImage(s, drawX - s.width/2, drawY - s.height/2);
+            }
+        }
 
         // Герой
         let bob = this.running && (this.keys['KeyW']||this.keys['KeyA']||this.keys['KeyS']||this.keys['KeyD']) ? Math.sin(Date.now()/100)*3 : 0;
-        this.ctx.font = '50px serif';
-        this.ctx.fillText('🤠', this.player.x, this.player.y - bob);
+        let hs = getSprite('🤠', 50);
+        this.ctx.drawImage(hs, this.player.x - hs.width/2 - cx, this.player.y - hs.height/2 - bob - cy);
 
-        // Прицел
-        let cx = this.player.x; let cy = this.player.y;
-        this.fields.forEach(f => f.tiles.forEach(t => {
-            let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
-            if(cx>tx && cx<tx+60 && cy>ty && cy<ty+60) {
-                this.ctx.strokeStyle = 'white'; this.ctx.lineWidth=3;
-                this.ctx.strokeRect(tx, ty, 60, 60);
+        // Прицел (только если близко)
+        let px = this.player.x; let py = this.player.y;
+        for(let f of this.fields) {
+            if(px < f.x || px > f.x+120 || py < f.y || py > f.y+180) continue;
+            for(let t of f.tiles) {
+                let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
+                if(px>tx && px<tx+60 && py>ty && py<ty+60) {
+                    this.ctx.strokeStyle = 'white'; this.ctx.lineWidth=3;
+                    this.ctx.strokeRect(tx - cx, ty - cy, 60, 60);
+                }
             }
-        }));
-
-        this.ctx.restore();
+        }
     }
 
-    // --- UI HELPERS ---
+    // --- UI ---
     popup(t, c) {
         let el = document.getElementById('message-area');
         el.innerText = t; el.style.color = c;
