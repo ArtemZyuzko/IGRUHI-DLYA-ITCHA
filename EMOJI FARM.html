@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Герой-Фермер: Grand Economy</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Color+Emoji&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #2ecc71;
+            font-family: 'Press Start 2P', cursive;
+            color: white;
+            user-select: none;
+        }
+
+        canvas { display: block; cursor: crosshair; }
+
+        /* UI */
+        #ui-layer {
+            position: absolute;
+            top: 10px; left: 10px;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: 320px;
+            z-index: 5;
+        }
+
+        .hud-panel {
+            background: rgba(0, 0, 0, 0.7);
+            border: 3px solid #fff;
+            padding: 12px;
+            border-radius: 10px;
+            font-size: 10px;
+            color: #fff;
+            backdrop-filter: blur(4px);
+        }
+
+        .section-title {
+            border-bottom: 2px solid #555;
+            margin-bottom: 8px;
+            padding-bottom: 4px;
+            color: #f1c40f;
+            text-align: center;
+        }
+
+        .inv-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 10px;
+        }
+
+        /* Главное меню */
+        #main-menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex; flex-direction: column;
+            justify-content: center; align-items: center;
+            z-index: 200; color: white; text-align: center;
+            backdrop-filter: blur(5px);
+        }
+
+        #main-menu h1 { font-size: 40px; color: #f1c40f; margin-bottom: 10px; text-shadow: 4px 4px 0 #d35400; }
+        .menu-btn {
+            padding: 15px 40px; font-size: 20px; background: #27ae60;
+            border: none; border-bottom: 5px solid #1e8449; color: white;
+            font-family: inherit; cursor: pointer; border-radius: 8px; margin-top: 20px;
+        }
+        .menu-btn:hover { filter: brightness(1.1); transform: translateY(-2px); }
+
+        /* Магазин */
+        #shop-modal {
+            display: none;
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            background: #fff; border: 8px solid #2c3e50;
+            color: #333; padding: 15px; width: 800px; height: 80vh;
+            border-radius: 15px; z-index: 10;
+            display: flex; flex-direction: column;
+        }
+
+        .shop-header { text-align: center; margin-bottom: 10px; font-size: 16px; }
+
+        .shop-tabs { display: flex; gap: 5px; margin-bottom: 10px; flex-shrink: 0; }
+        .shop-tab {
+            flex: 1; background: #ecf0f1; border: none; padding: 10px;
+            cursor: pointer; font-family: inherit; font-size: 10px;
+            border-bottom: 4px solid #bdc3c7;
+        }
+        .shop-tab.active { background: #2c3e50; color: #fff; border-bottom: 4px solid #000; }
+
+        #shop-scroll-area {
+            flex: 1; overflow-y: auto; padding-right: 5px;
+        }
+
+        .shop-grid {
+            display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+        }
+
+        .shop-item {
+            background: #fdfdfd; border: 1px solid #ccc;
+            padding: 8px; text-align: center; font-size: 9px;
+            border-radius: 6px; display: flex; flex-direction: column;
+            justify-content: space-between; height: 140px;
+        }
+
+        .price-tag { color: #e74c3c; font-weight: bold; }
+        .profit-tag { color: #27ae60; font-weight: bold; }
+
+        .shop-btn {
+            margin-top: auto; background: #27ae60; color: white;
+            border: none; border-bottom: 3px solid #1e8449;
+            padding: 6px; cursor: pointer; font-family: inherit; width: 100%; font-size: 8px;
+        }
+        .shop-btn:disabled { background: #95a5a6; border-color: #7f8c8d; cursor: not-allowed; }
+        .sell-btn { background: #e67e22; border-color: #d35400; }
+
+        .close-btn {
+            background: #c0392b; color: white; border: none;
+            border-bottom: 4px solid #922b21; padding: 10px;
+            width: 100%; margin-top: 10px; cursor: pointer; font-family: inherit; flex-shrink: 0;
+        }
+
+        #message-area {
+            position: absolute; top: 15%; left: 50%; transform: translateX(-50%);
+            font-size: 20px; font-weight: bold; text-shadow: 2px 2px 0 #000;
+            pointer-events: none; opacity: 0; transition: opacity 0.3s; z-index: 100;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- MENU -->
+    <div id="main-menu">
+        <h1>🌍 ГЕРОЙ-ФЕРМЕР</h1>
+        <h2 style="color:#2ecc71; font-size:14px;">ULTIMATE ECONOMY</h2>
+        <div style="font-size:10px; max-width: 600px; line-height:1.5; color:#ccc; margin-bottom:20px;">
+            ЭКОНОМИКА ЖИВАЯ: Чем больше вы покупаете семена, тем они ДОРОЖЕ.<br>
+            Чем больше продаете урожай, тем он ДЕШЕВЛЕ.<br>
+            Разнообразие — ключ к успеху!<br>
+            Осторожно: Волки голодны.
+        </div>
+        <button class="menu-btn" onclick="game.startGame()">НАЧАТЬ</button>
+    </div>
+
+    <!-- UI -->
+    <div id="ui-layer">
+        <div class="hud-panel">
+            <div class="inv-row"><span style="font-size:14px">💰 Бюджет:</span> <span id="money-display" style="color:#f1c40f; font-size:14px">0</span></div>
+        </div>
+        <div class="hud-panel">
+            <div class="section-title">🎒 Рука (Q)</div>
+            <div id="active-tool" style="text-align: center; font-size: 24px; margin-bottom:5px;"></div>
+            <div style="text-align: center;">Семян: <span id="seed-count" style="color:#2ecc71">0</span></div>
+            <div style="text-align: center; font-size:8px; color:#aaa; margin-top:2px;">Цена покупки растет!</div>
+        </div>
+        <div class="hud-panel">
+            <div class="section-title">📦 Урожай</div>
+            <div id="inventory-list" style="max-height: 200px; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <div id="message-area"></div>
+
+    <!-- SHOP -->
+    <div id="shop-modal" style="display:none;">
+        <div class="shop-header">📈 БИРЖА КУЛЬТУР</div>
+        <div class="shop-tabs">
+            <button class="shop-tab active" onclick="game.switchTab('buy')">КУПИТЬ СЕМЕНА</button>
+            <button class="shop-tab" onclick="game.switchTab('sell')">СДАТЬ УРОЖАЙ</button>
+        </div>
+        <div id="shop-scroll-area">
+            <div id="shop-content" class="shop-grid"></div>
+        </div>
+        <div style="margin-top:10px; text-align:center;">
+             <button id="buy-field-btn" class="shop-btn" style="background:#3498db; border-color:#2980b9; font-size:12px; padding:10px;" onclick="game.buyField()">Купить Землю (100)</button>
+        </div>
+        <button class="close-btn" onclick="game.toggleShop()">ЗАКРЫТЬ (E)</button>
+    </div>
+
+<script>
+
+/* --- 50+ КУЛЬТУР --- */
+// Base Price: Базовая цена семени
+// Growth: Время роста (мс)
+// Value Multiplier: Во сколько раз продажа дороже базы (до инфляции)
+// Все цены стартуют низко, но растут от спроса!
+const CROPS = {
+    // TIER 1: Стартовые (Быстрые, дешевые)
+    wheat: { n:'Пшеница', i:'🌾', p:5, m:2.0, t:3000 },
+    clover: { n:'Клевер', i:'☘️', p:6, m:2.1, t:3500 },
+    rice: { n:'Рис', i:'🍚', p:7, m:2.2, t:4000 },
+    grass: { n:'Трава', i:'🌿', p:4, m:1.8, t:2000 },
+
+    // TIER 2: Простые овощи
+    carrot: { n:'Морковь', i:'🥕', p:15, m:2.5, t:6000 },
+    potato: { n:'Картофель', i:'🥔', p:18, m:2.6, t:7000 },
+    cucumber: { n:'Огурец', i:'🥒', p:20, m:2.7, t:7500 },
+    onion: { n:'Лук', i:'🧅', p:22, m:2.8, t:8000 },
+    garlic: { n:'Чеснок', i:'🧄', p:25, m:3.0, t:8500 },
+    corn: { n:'Кукуруза', i:'🌽', p:30, m:3.2, t:10000 },
+
+    // TIER 3: Зелень и Специи
+    broccoli: { n:'Брокколи', i:'🥦', p:35, m:3.3, t:11000 },
+    salad: { n:'Салат', i:'🥬', p:32, m:3.1, t:10500 },
+    pepper: { n:'Перец', i:'🌶️', p:40, m:3.5, t:12000 },
+    bellpepper: { n:'Паприка', i:'🫑', p:45, m:3.6, t:13000 },
+    herb: { n:'Травы', i:'🍃', p:28, m:2.9, t:9000 },
+
+    // TIER 4: Корнеплоды и прочее
+    beet: { n:'Свекла', i:'🟥', p:50, m:3.7, t:14000 }, // Используем квадрат как заглушку цвета
+    sweetpotato: { n:'Батат', i:'🍠', p:55, m:3.8, t:15000 },
+    peanut: { n:'Арахис', i:'🥜', p:60, m:4.0, t:16000 },
+    bean: { n:'Фасоль', i:'🫘', p:65, m:4.1, t:17000 },
+
+    // TIER 5: Ягоды и простые фрукты
+    tomato: { n:'Томат', i:'🍅', p:70, m:4.2, t:18000 },
+    eggplant: { n:'Баклажан', i:'🍆', p:75, m:4.3, t:19000 },
+    strawberry: { n:'Клубника', i:'🍓', p:80, m:4.5, t:20000 },
+    cherry: { n:'Вишня', i:'🍒', p:85, m:4.6, t:21000 },
+    blueberry: { n:'Черника', i:'🫐', p:90, m:4.7, t:22000 },
+
+    // TIER 6: Фрукты (Долгие, дорогие)
+    grapes: { n:'Виноград', i:'🍇', p:100, m:5.0, t:25000 },
+    melon: { n:'Дыня', i:'🍈', p:110, m:5.2, t:27000 },
+    watermelon: { n:'Арбуз', i:'🍉', p:120, m:5.5, t:30000 },
+    tangerine: { n:'Мандарин', i:'🍊', p:130, m:5.7, t:32000 },
+    lemon: { n:'Лимон', i:'🍋', p:140, m:6.0, t:35000 },
+    banana: { n:'Банан', i:'🍌', p:150, m:6.2, t:37000 },
+    pineapple: { n:'Ананас', i:'🍍', p:160, m:6.5, t:40000 },
+
+    // TIER 7: Экзотика
+    mango: { n:'Манго', i:'🥭', p:200, m:7.0, t:45000 },
+    apple: { n:'Яблоко', i:'🍎', p:180, m:6.8, t:42000 },
+    greenapple: { n:'Яблоко З.', i:'🍏', p:185, m:6.9, t:43000 },
+    pear: { n:'Груша', i:'🍐', p:190, m:7.0, t:44000 },
+    peach: { n:'Персик', i:'🍑', p:210, m:7.2, t:47000 },
+    kiwi: { n:'Киви', i:'🥝', p:220, m:7.5, t:50000 },
+    coconut: { n:'Кокос', i:'🥥', p:250, m:8.0, t:55000 },
+
+    // TIER 8: Элита
+    mushroom: { n:'Гриб', i:'🍄', p:300, m:9.0, t:60000 },
+    chestnut: { n:'Каштан', i:'🌰', p:320, m:9.5, t:65000 },
+    avocado: { n:'Авокадо', i:'🥑', p:350, m:10.0, t:70000 },
+    olive: { n:'Оливка', i:'🫒', p:380, m:10.5, t:75000 },
+    pumpkin: { n:'Тыква', i:'🎃', p:400, m:11.0, t:80000 },
+
+    // TIER 9: Сокровища
+    bamboo: { n:'Бамбук', i:'🎍', p:500, m:12.0, t:90000 },
+    hibiscus: { n:'Гибискус', i:'🌺', p:600, m:13.0, t:100000 },
+    sunflower: { n:'Подсолнух', i:'🌻', p:700, m:14.0, t:110000 },
+    rose: { n:'Роза', i:'🌹', p:800, m:15.0, t:120000 },
+    tree: { n:'Елка', i:'🌲', p:1000, m:20.0, t:150000 }
+};
+
+const CROP_KEYS = Object.keys(CROPS);
+const EMOJIS = { hero: '🤠', shop: '🏪', ground: '#2ecc71', soil: '#5d4037', sprout: '🌱' };
+
+/* --- КЛАССЫ --- */
+
+class Animal {
+    constructor(type, x, y) {
+        this.type = type;
+        this.x = x; this.y = y;
+        this.size = type === 'wolf' ? 45 : (type === 'cow' ? 50 : 35);
+        this.vx = 0; this.vy = 0;
+
+        // Emojis
+        if(type==='wolf') this.emoji = '🐺';
+        else if(type==='pig') this.emoji = '🐖';
+        else if(type==='cow') this.emoji = '🐄';
+        else if(type==='chicken') this.emoji = '🐓';
+
+        this.target = null;
+        this.dead = false;
+        this.deathTimer = 0;
+    }
+
+    update(animals, game) {
+        if (this.dead) return;
+
+        // Random wander
+        if (Math.random() < 0.02) {
+            this.vx = (Math.random() - 0.5) * 1.5;
+            this.vy = (Math.random() - 0.5) * 1.5;
+        }
+
+        // --- ЛОГИКА ВОЛКА ---
+        if (this.type === 'wolf') {
+            if (!this.target || this.target.dead) {
+                let minDist = 500;
+                let potential = null;
+                animals.forEach(a => {
+                    if (a !== this && a.type !== 'wolf' && !a.dead) {
+                        let d = Math.hypot(a.x - this.x, a.y - this.y);
+                        if (d < minDist) { minDist = d; potential = a; }
+                    }
+                });
+                this.target = potential;
+            }
+
+            if (this.target && !this.target.dead) {
+                let dx = this.target.x - this.x;
+                let dy = this.target.y - this.y;
+                let dist = Math.hypot(dx, dy);
+
+                // АТАКА
+                if (dist < 20) {
+                    this.target.die(game); // УБИЙСТВО
+                    this.target = null;
+                } else {
+                    this.vx = (dx / dist) * 2.8; // Волк довольно быстр
+                    this.vy = (dy / dist) * 2.8;
+                }
+            }
+        } else {
+            // --- ЛОГИКА ЖЕРТВЫ ---
+            // Убегать от волка
+            let closestWolf = null;
+            let minDist = 250;
+            animals.forEach(a => {
+                if (a.type === 'wolf') {
+                    let d = Math.hypot(a.x - this.x, a.y - this.y);
+                    if (d < minDist) { minDist = d; closestWolf = a; }
+                }
+            });
+
+            if (closestWolf) {
+                let dx = this.x - closestWolf.x;
+                let dy = this.y - closestWolf.y;
+                let dist = Math.hypot(dx, dy);
+                // Жертва бежит чуть быстрее волка в рывке (шанс спастись)
+                this.vx = (dx / dist) * 3.5;
+                this.vy = (dy / dist) * 3.5;
+            }
+        }
+
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Границы
+        this.x = Math.max(20, Math.min(this.x, 2500 - 20));
+        this.y = Math.max(20, Math.min(this.y, 2000 - 20));
+    }
+
+    die(game) {
+        this.dead = true;
+        this.emoji = '💀';
+        game.popup("Кто-то был съеден...", '#e74c3c');
+
+        // Респаун через 3 секунды
+        setTimeout(() => {
+            game.respawnAnimal(this.type);
+        }, 3000);
+    }
+}
+
+class Game {
+    constructor() {
+        this.canvas = document.getElementById('gameCanvas');
+        this.ctx = this.canvas.getContext('2d');
+        this.resize();
+
+        this.running = false;
+        this.money = 150; // Чуть больше денег на старт для экспериментов
+        this.fields = [];
+        this.animals = [];
+        this.flora = [];
+
+        // Инвентарь
+        this.seeds = {};
+        this.inventory = {};
+
+        // --- ЭКОНОМИКА ---
+        // Сколько раз купили (повышает цену)
+        this.boughtCounts = {};
+        // Сколько раз продали (понижает цену продажи)
+        this.soldCounts = {};
+
+        CROP_KEYS.forEach(k => {
+            this.seeds[k] = 0;
+            this.inventory[k] = 0;
+            this.boughtCounts[k] = 0;
+            this.soldCounts[k] = 0;
+        });
+
+        // Стартовый набор
+        this.seeds['wheat'] = 5;
+
+        this.player = { x: 1250, y: 1000, seedIdx: 0 };
+        this.camera = { x: 0, y: 0 };
+        this.shop = { x: 1150, y: 800, open: false, tab: 'buy' };
+
+        // Инициализация мира
+        this.addField(this.player.x - 30, this.player.y + 60);
+        this.generateWorld();
+
+        // Input
+        this.keys = {};
+        window.onkeydown = e => {
+            this.keys[e.code] = true;
+            if (e.code === 'Escape') this.toggleMenu();
+            if (!this.running) return;
+            if (e.code === 'KeyE') this.interactShop();
+            if (e.code === 'Space') this.interactField();
+            if (e.code === 'KeyQ') this.cycleSeed();
+        };
+        window.onkeyup = e => this.keys[e.code] = false;
+        window.onresize = () => this.resize();
+
+        this.updateUI();
+        this.loop();
+    }
+
+    generateWorld() {
+        // Растения
+        for(let i=0; i<400; i++) {
+            let type = Math.random()>0.5 ? ['🌲','🌳','🌴'] : ['🌻','🌷','🌹','🌼'];
+            let em = type[Math.floor(Math.random()*type.length)];
+            this.flora.push({ e: em, x: Math.random()*2500, y: Math.random()*2000, s: 40+Math.random()*40 });
+        }
+        // Животные
+        for(let i=0; i<20; i++) this.animals.push(new Animal('pig', Math.random()*2500, Math.random()*2000));
+        for(let i=0; i<20; i++) this.animals.push(new Animal('chicken', Math.random()*2500, Math.random()*2000));
+        for(let i=0; i<10; i++) this.animals.push(new Animal('cow', Math.random()*2500, Math.random()*2000));
+        for(let i=0; i<6; i++) this.animals.push(new Animal('wolf', Math.random()*2500, Math.random()*2000));
+
+        // Очистка спавна
+        this.flora = this.flora.filter(f => Math.hypot(f.x - this.player.x, f.y - this.player.y) > 300);
+    }
+
+    respawnAnimal(type) {
+        // Спавним далеко от игрока
+        let x, y, d;
+        do {
+            x = Math.random() * 2500;
+            y = Math.random() * 2000;
+            d = Math.hypot(x - this.player.x, y - this.player.y);
+        } while (d < 800); // Минимум 800 пикселей от игрока
+
+        // Удаляем трупы этого типа (очистка массива)
+        this.animals = this.animals.filter(a => !(a.type === type && a.dead));
+        // Добавляем нового
+        this.animals.push(new Animal(type, x, y));
+    }
+
+    startGame() {
+        this.running = true;
+        document.getElementById('main-menu').style.display = 'none';
+    }
+
+    toggleMenu() {
+        this.running = !this.running;
+        document.getElementById('main-menu').style.display = this.running ? 'none' : 'flex';
+        document.querySelector('#main-menu h1').innerText = this.running ? "" : "ПАУЗА";
+        document.querySelector('#main-menu button').innerText = "ПРОДОЛЖИТЬ";
+    }
+
+    resize() {
+        this.canvas.width = window.innerWidth;
+        this.canvas.height = window.innerHeight;
+    }
+
+    // --- ЭКОНОМИКА ---
+
+    // Цена покупки растет на 5% за каждую покупку этого вида
+    getBuyPrice(k) {
+        let base = CROPS[k].p;
+        let inflation = 1 + (this.boughtCounts[k] * 0.05);
+        return Math.floor(base * inflation);
+    }
+
+    // Цена продажи падает на 2% за каждую продажу (дефляция спроса)
+    getSellPrice(k) {
+        let base = Math.floor(CROPS[k].p * CROPS[k].m);
+        let saturation = 1 + (this.soldCounts[k] * 0.02);
+        let price = Math.floor(base / saturation);
+        return Math.max(1, price); // Минимум 1 монета
+    }
+
+    buySeed(k) {
+        let p = this.getBuyPrice(k);
+        if (this.money >= p) {
+            this.money -= p;
+            this.seeds[k]++;
+            this.boughtCounts[k]++; // Инфляция!
+            this.updateShop();
+            this.updateUI();
+        } else {
+            this.popup("Нет денег!", '#e74c3c');
+        }
+    }
+
+    sellCrop(k) {
+        let count = this.inventory[k];
+        if (count > 0) {
+            let unitPrice = this.getSellPrice(k);
+            let total = count * unitPrice;
+            this.money += total;
+            this.inventory[k] = 0;
+            this.soldCounts[k] += count; // Рынок насыщается, цена падает
+            this.popup(`Продано за ${total}`, '#f1c40f');
+            this.updateShop();
+            this.updateUI();
+        }
+    }
+
+    // --- GAMEPLAY ---
+
+    addField(x, y) {
+        let tiles = [];
+        for(let i=0; i<2; i++) for(let j=0; j<3; j++) tiles.push({ rx:i, ry:j, c:null });
+        this.fields.push({ x, y, w:2, h:3, tiles });
+        // Рубка деревьев
+        this.flora = this.flora.filter(f => !(f.x > x && f.x < x+120 && f.y > y && f.y < y+180));
+    }
+
+    buyField() {
+        let cost = 100 * this.fields.length;
+        if(this.money >= cost) {
+            this.money -= cost;
+            let last = this.fields[this.fields.length-1];
+            let nx = last.x + 140; let ny = last.y;
+            if(nx > 2400) { nx = this.fields[0].x; ny += 200; }
+            this.addField(nx, ny);
+            this.updateShop();
+            this.updateUI();
+        } else this.popup("Мало денег", '#e74c3c');
+    }
+
+    cycleSeed() {
+        this.player.seedIdx = (this.player.seedIdx + 1) % CROP_KEYS.length;
+        this.updateUI();
+    }
+
+    interactField() {
+        if(this.shop.open) return;
+        let px = this.player.x; let py = this.player.y;
+
+        for(let f of this.fields) {
+            for(let t of f.tiles) {
+                let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
+                if(px > tx && px < tx+60 && py > ty && py < ty+60) {
+                    if(t.c && t.c.r) {
+                        // Сбор
+                        this.inventory[t.c.k]++;
+                        this.popup(`+1 ${CROPS[t.c.k].i}`, '#2ecc71');
+                        t.c = null;
+                        this.updateUI();
+                    } else if(!t.c) {
+                        // Посадка
+                        let k = CROP_KEYS[this.player.seedIdx];
+                        if(this.seeds[k] > 0) {
+                            this.seeds[k]--;
+                            t.c = { k: k, start: Date.now(), r: false };
+                            this.popup("Посажено", '#fff');
+                            this.updateUI();
+                        } else this.popup("Нет семян!", '#e74c3c');
+                    }
+                }
+            }
+        }
+    }
+
+    // --- UPDATE & DRAW ---
+
+    loop() {
+        if(this.running) {
+            // Player Move
+            let speed = 6;
+            if(this.keys['KeyW'] || this.keys['ArrowUp']) this.player.y -= speed;
+            if(this.keys['KeyS'] || this.keys['ArrowDown']) this.player.y += speed;
+            if(this.keys['KeyA'] || this.keys['ArrowLeft']) this.player.x -= speed;
+            if(this.keys['KeyD'] || this.keys['ArrowRight']) this.player.x += speed;
+            this.player.x = Math.max(0, Math.min(this.player.x, 2500));
+            this.player.y = Math.max(0, Math.min(this.player.y, 2000));
+
+            // Camera
+            this.camera.x = Math.max(0, Math.min(this.player.x - this.canvas.width/2, 2500 - this.canvas.width));
+            this.camera.y = Math.max(0, Math.min(this.player.y - this.canvas.height/2, 2000 - this.canvas.height));
+
+            // Crops
+            let now = Date.now();
+            this.fields.forEach(f => f.tiles.forEach(t => {
+                if(t.c && !t.c.r && now - t.c.start > CROPS[t.c.k].t) t.c.r = true;
+            }));
+
+            // Animals
+            this.animals.forEach(a => a.update(this.animals, this));
+            // Удаляем "окончательно мертвых" (чье время анимации смерти вышло), хотя респаун делает это тоже
+        }
+
+        this.draw();
+        requestAnimationFrame(() => this.loop());
+    }
+
+    draw() {
+        this.ctx.fillStyle = '#2ecc71';
+        this.ctx.fillRect(0,0,this.canvas.width, this.canvas.height);
+        this.ctx.save();
+        this.ctx.translate(-this.camera.x, -this.camera.y);
+
+        // Граница
+        this.ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        this.ctx.lineWidth = 10;
+        this.ctx.strokeRect(0,0,2500,2000);
+
+        // Флора
+        this.flora.forEach(f => {
+            this.ctx.font = `${f.s}px serif`;
+            this.ctx.textAlign='center'; this.ctx.textBaseline='middle';
+            this.ctx.fillText(f.e, f.x, f.y);
+        });
+
+        // Поля
+        this.fields.forEach(f => {
+            this.ctx.fillStyle = '#5d4037';
+            this.ctx.fillRect(f.x, f.y, 120, 180);
+            this.ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+            this.ctx.strokeRect(f.x, f.y, 120, 180);
+            f.tiles.forEach(t => {
+                let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
+                this.ctx.strokeRect(tx, ty, 60, 60);
+                if(t.c) {
+                    let icon = t.c.r ? CROPS[t.c.k].i : '🌱';
+                    let size = t.c.r ? 40 : 25;
+                    let bounce = t.c.r && this.running ? Math.sin(Date.now()/300)*3 : 0;
+                    this.ctx.font = `${size}px serif`;
+                    this.ctx.fillText(icon, tx+30, ty+30+bounce);
+                }
+            });
+        });
+
+        // Магазин
+        this.ctx.font = '80px serif';
+        this.ctx.fillText('🏪', this.shop.x, this.shop.y);
+        this.ctx.fillStyle='white'; this.ctx.font='12px sans-serif';
+        this.ctx.fillText('МАГАЗИН', this.shop.x, this.shop.y-50);
+
+        // Животные
+        this.animals.forEach(a => {
+            let jump = this.running && !a.dead ? Math.abs(Math.sin(Date.now()/200 + a.x))*5 : 0;
+            this.ctx.font = `${a.size}px serif`;
+            this.ctx.save();
+            this.ctx.translate(a.x, a.y - jump);
+            if(a.vx < 0) this.ctx.scale(-1, 1);
+            this.ctx.fillText(a.emoji, 0, 0);
+            this.ctx.restore();
+        });
+
+        // Герой
+        let bob = this.running && (this.keys['KeyW']||this.keys['KeyA']||this.keys['KeyS']||this.keys['KeyD']) ? Math.sin(Date.now()/100)*3 : 0;
+        this.ctx.font = '50px serif';
+        this.ctx.fillText('🤠', this.player.x, this.player.y - bob);
+
+        // Прицел
+        let cx = this.player.x; let cy = this.player.y;
+        this.fields.forEach(f => f.tiles.forEach(t => {
+            let tx = f.x + t.rx*60; let ty = f.y + t.ry*60;
+            if(cx>tx && cx<tx+60 && cy>ty && cy<ty+60) {
+                this.ctx.strokeStyle = 'white'; this.ctx.lineWidth=3;
+                this.ctx.strokeRect(tx, ty, 60, 60);
+            }
+        }));
+
+        this.ctx.restore();
+    }
+
+    // --- UI HELPERS ---
+    popup(t, c) {
+        let el = document.getElementById('message-area');
+        el.innerText = t; el.style.color = c;
+        el.style.opacity = 1; el.style.top = '10%';
+        setTimeout(() => { el.style.opacity=0; el.style.top='15%'; }, 1500);
+    }
+
+    interactShop() {
+        if(Math.hypot(this.player.x-this.shop.x, this.player.y-this.shop.y) < 150) this.toggleShop();
+    }
+    toggleShop() {
+        this.shop.open = !this.shop.open;
+        document.getElementById('shop-modal').style.display = this.shop.open ? 'flex' : 'none';
+        if(this.shop.open) this.updateShop();
+    }
+    switchTab(t) {
+        this.shop.tab = t;
+        document.querySelectorAll('.shop-tab').forEach(b => b.classList.remove('active'));
+        let idx = t === 'buy' ? 0 : 1;
+        document.querySelectorAll('.shop-tab')[idx].classList.add('active');
+        this.updateShop();
+    }
+    updateUI() {
+        document.getElementById('money-display').innerText = this.money;
+        let k = CROP_KEYS[this.player.seedIdx];
+        document.getElementById('active-tool').innerText = CROPS[k].i + ' ' + CROPS[k].n;
+        document.getElementById('seed-count').innerText = this.seeds[k];
+        let inv = '';
+        CROP_KEYS.forEach(key => {
+            if(this.inventory[key]>0) inv += `<div class="inv-row"><span>${CROPS[key].i} ${CROPS[key].n}</span> <span>x${this.inventory[key]}</span></div>`;
+        });
+        document.getElementById('inventory-list').innerHTML = inv || '<div style="text-align:center; color:#777">Пусто</div>';
+    }
+    updateShop() {
+        let c = document.getElementById('shop-content'); c.innerHTML = '';
+        if(this.shop.tab === 'buy') {
+            CROP_KEYS.forEach(k => {
+                let p = this.getBuyPrice(k);
+                let div = document.createElement('div'); div.className='shop-item';
+                div.innerHTML = `
+                    <div style="font-size:24px">${CROPS[k].i}</div>
+                    <b>${CROPS[k].n}</b>
+                    <div class="price-tag">${p} 💰</div>
+                    <div style="color:#777">Рост: ${CROPS[k].t/1000}с</div>
+                    <button class="shop-btn" onclick="game.buySeed('${k}')">КУПИТЬ</button>
+                `;
+                c.appendChild(div);
+            });
+        } else {
+            CROP_KEYS.forEach(k => {
+                let count = this.inventory[k];
+                let unit = this.getSellPrice(k);
+                let div = document.createElement('div'); div.className='shop-item';
+                div.innerHTML = `
+                    <div style="font-size:24px">${CROPS[k].i}</div>
+                    <b>${CROPS[k].n}</b>
+                    <div>У вас: ${count}</div>
+                    <div class="profit-tag">Цена: ${unit}</div>
+                    <button class="shop-btn sell-btn" ${count===0?'disabled':''} onclick="game.sellCrop('${k}')">ПРОДАТЬ ВСЕ</button>
+                `;
+                c.appendChild(div);
+            });
+        }
+        let cost = 100 * this.fields.length;
+        document.getElementById('buy-field-btn').innerText = `КУПИТЬ ЗЕМЛЮ (${cost})`;
+    }
+}
+
+const game = new Game();
+
+</script>
+</body>
+</html>
