@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Frontline: Global War v8.0</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+    body {
+        overflow: hidden;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: #1a1f2e;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* Dynamic UI Scaling Wrapper */
+    .ui-layer {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        /* UI Scale will be applied via inline style */
+        transform-origin: center center;
+    }
+
+    .ui-element {
+        pointer-events: auto;
+    }
+
+    /* Mobile Controls Styles */
+    .control-btn {
+        backdrop-filter: blur(4px);
+        background: rgba(0, 0, 0, 0.3);
+        border: 2px solid rgba(255, 255, 255, 0.2);
+        color: rgba(255, 255, 255, 0.8);
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.1s, background 0.1s;
+        touch-action: manipulation;
+    }
+    .control-btn:active, .control-btn.active {
+        background: rgba(255, 255, 255, 0.2);
+        transform: scale(0.95);
+        border-color: rgba(255, 255, 255, 0.6);
+    }
+    .btn-fire {
+        background: rgba(220, 38, 38, 0.3);
+        border-color: rgba(220, 38, 38, 0.5);
+    }
+    .btn-fire:active {
+        background: rgba(220, 38, 38, 0.6);
+    }
+
+    /* Joystick */
+    #joystick-base {
+        position: absolute;
+        bottom: 50px;
+        left: 50px;
+        width: 140px;
+        height: 140px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 2px solid rgba(255, 255, 255, 0.1);
+        border-radius: 50%;
+        touch-action: none;
+    }
+    #joystick-stick {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 60px;
+        height: 60px;
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        transform: translate(-50%, -50%);
+        pointer-events: none;
+        box-shadow: 0 0 10px rgba(0,0,0,0.5);
+    }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #6b7280; }
+
+    .animate-pulse-fast { animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+</style>
+</head>
+<body class="h-screen w-screen relative">
+
+<div id="app" class="w-full h-full relative"></div>
+
+<script>
+// Default World Dims (overridden by state)
+let worldWidth = 3200;
+let worldHeight = 2500;
+
+// --- AUDIO SYSTEM ---
+const AudioSys = {
+    ctx: null,
+    enabled: true,
+    lastPlay: {},
+    init: function() {
+        if (this.ctx) return;
+        window.AudioContext = window.AudioContext || window.webkitAudioContext;
+        this.ctx = new AudioContext();
+    },
+    play: function(type, vol = 1) {
+        if (!this.enabled || !this.ctx) return;
+        const now = Date.now();
+        const limits = { 'shot': 60, 'hit': 50, 'explode': 100, 'reload': 200 };
+        if (this.lastPlay[type] && now - this.lastPlay[type] < (limits[type] || 50)) return;
+        this.lastPlay[type] = now;
+
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        const t = this.ctx.currentTime;
+        if (type === 'shot') {
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(150 + Math.random()*50, t);
+            osc.frequency.exponentialRampToValueAtTime(0.01, t + 0.1);
+            gain.gain.setValueAtTime(0.05 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
+            osc.start(t); osc.stop(t + 0.1);
+        } else if (type === 'shot_heavy') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(100, t);
+            osc.frequency.exponentialRampToValueAtTime(0.01, t + 0.2);
+            gain.gain.setValueAtTime(0.1 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+            osc.start(t); osc.stop(t + 0.2);
+        } else if (type === 'explode') {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(50, t);
+            osc.frequency.exponentialRampToValueAtTime(0.01, t + 0.5);
+            gain.gain.setValueAtTime(0.2 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+            osc.start(t); osc.stop(t + 0.5);
+        } else if (type === 'hit') {
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(800, t);
+            gain.gain.setValueAtTime(0.05 * vol, t);
+            gain.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
+            osc.start(t); osc.stop(t + 0.05);
+        } else if (type === 'reload') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(600, t);
+            osc.frequency.linearRampToValueAtTime(400, t+0.15);
+            gain.gain.setValueAtTime(0.05 * vol, t);
+            gain.gain.linearRampToValueAtTime(0, t + 0.15);
+            osc.start(t); osc.stop(t + 0.15);
+        }
+    }
+};
+
+const CAMO_PALETTES = {
+    ua: ['#6b5e49', '#8f826a', '#4a4336'], us: ['#7d7363', '#9c917e', '#5e5648'],
+    de: ['#5c5340', '#7a6f59', '#3d362a'], cn: ['#806b5a', '#a38c7a', '#594a3d'],
+    kz: ['#8cb5c9', '#e6c55d', '#4a6b7a'], jp: ['#586e53', '#8a9c85', '#3d4d3a'],
+    uk: ['#636b46', '#4a3c31', '#8a9679'], fr: ['#575e4e', '#4a3c31', '#8f8876'],
+    pl: ['#3f4738', '#564e3e', '#2e3326'], tr: ['#4a4636', '#615844', '#332f24'],
+    kr: ['#35422e', '#4f4637', '#635f50'], it: ['#4b5240', '#665e48', '#33362a'],
+    ca: ['#4c593d', '#757a60', '#303628'], il: ['#6a6855', '#827f68', '#47463d'],
+    se: ['#3c4d38', '#263022', '#5e705a'], au: ['#8f8976', '#aeb296', '#706a58'],
+    br: ['#2f3825', '#4a5738', '#1a2115'], es: ['#6e6352', '#8a7f6a', '#4a4236'],
+};
+
+const COUNTRIES = [
+    { id: 'ua', name: 'Украина', color: '#0057b7', sec: '#ffd700', camo: 'ua', flag: '🇺🇦' },
+    { id: 'us', name: 'США', color: '#3b82f6', sec: '#ffffff', camo: 'us', flag: '🇺🇸' },
+    { id: 'de', name: 'Германия', color: '#374151', sec: '#facc15', camo: 'de', flag: '🇩🇪' },
+    { id: 'cn', name: 'Китай', color: '#dc2626', sec: '#fbbf24', camo: 'cn', flag: '🇨🇳' },
+    { id: 'kz', name: 'Казахстан', color: '#00afca', sec: '#fec50c', camo: 'kz', flag: '🇰🇿' },
+    { id: 'jp', name: 'Япония', color: '#bc002d', sec: '#ffffff', camo: 'jp', flag: '🇯🇵' },
+    { id: 'uk', name: 'Британия', color: '#012169', sec: '#c8102e', camo: 'uk', flag: '🇬🇧' },
+    { id: 'fr', name: 'Франция', color: '#002395', sec: '#ed2939', camo: 'fr', flag: '🇫🇷' },
+    { id: 'pl', name: 'Польша', color: '#dc143c', sec: '#ffffff', camo: 'pl', flag: '🇵🇱' },
+    { id: 'tr', name: 'Турция', color: '#e30a17', sec: '#ffffff', camo: 'tr', flag: '🇹🇷' },
+    { id: 'kr', name: 'Юж. Корея', color: '#0047a0', sec: '#cd2e3a', camo: 'kr', flag: '🇰🇷' },
+    { id: 'it', name: 'Италия', color: '#009246', sec: '#ce2b37', camo: 'it', flag: '🇮🇹' },
+    { id: 'ca', name: 'Канада', color: '#ff0000', sec: '#ffffff', camo: 'ca', flag: '🇨🇦' },
+    { id: 'il', name: 'Израиль', color: '#005eb8', sec: '#ffffff', camo: 'il', flag: '🇮🇱' },
+    { id: 'se', name: 'Швеция', color: '#006aa7', sec: '#fecc00', camo: 'se', flag: '🇸🇪' },
+    { id: 'au', name: 'Австралия', color: '#012169', sec: '#e4002b', camo: 'au', flag: '🇦🇺' },
+    { id: 'br', name: 'Бразилия', color: '#009c3b', sec: '#ffdf00', camo: 'br', flag: '🇧🇷' },
+    { id: 'es', name: 'Испания', color: '#aa151b', sec: '#f1bf00', camo: 'es', flag: '🇪🇸' },
+];
+
+const CLASSES = [
+    { id: 'assault', name: 'Штурмовик', hp: 120, speed: 4.0, icon: 'target' },
+    { id: 'sniper', name: 'Снайпер', hp: 70, speed: 4.5, icon: 'crosshair' },
+    { id: 'heavy', name: 'Пулеметчик', hp: 180, speed: 3.0, icon: 'shield' },
+    { id: 'miner', name: 'Сапёр', hp: 100, speed: 5.5, icon: 'bomb' },
+    { id: 'builder', name: 'Инженер', hp: 110, speed: 3.5, icon: 'hammer' },
+    { id: 'medic', name: 'Медик', hp: 90, speed: 4.2, icon: 'activity' },
+    { id: 'grenadier', name: 'Гренадер', hp: 100, speed: 3.2, icon: 'flame' },
+    { id: 'supplier', name: 'Снабженец', hp: 110, speed: 4.8, icon: 'package' }
+];
+
+const getLoadout = (cid, clid) => {
+    const primary = { name: 'Rifle', damage: 12, rate: 100, range: 450, spread: 0.1, ammo: 30, total: 120, type: 'bullet' };
+    const secondary = { name: 'Pistol', damage: 9, rate: 200, range: 250, spread: 0.1, ammo: 15, total: 60, type: 'bullet' };
+    if(clid === 'sniper') { primary.damage = 65; primary.rate = 800; primary.range = 900; primary.spread = 0.01; primary.ammo = 10; primary.total=40; primary.name="Sniper Rifle"; }
+    if(clid === 'heavy') { primary.damage = 10; primary.rate = 70; primary.range = 500; primary.spread = 0.25; primary.ammo = 100; primary.total=300; primary.name="LMG"; }
+    if(clid === 'grenadier') {
+        primary.damage = 120; primary.rate = 2000; primary.range = 600; primary.spread = 0.1; primary.ammo = 1; primary.total=10;
+        primary.type='grenade'; primary.reload=180; primary.name="Grenade Launcher";
+    }
+    if(clid === 'medic') { secondary.name="Medkit"; secondary.type='medkit'; secondary.damage=-15; secondary.range=150; secondary.ammo=99; secondary.total=99; secondary.rate=500; }
+    if(clid === 'supplier') { secondary.name="Ammo Box"; secondary.type='supply'; secondary.damage=0; secondary.range=50; secondary.ammo=1; secondary.total=1; secondary.rate=1000; }
+    return [primary, secondary].map(w => ({
+        ...w, currentMag: w.ammo, reserveAmmo: w.total, lastShot: 0, isReloading: false, reloadProgress: 0
+    }));
+};
+
+const state = {
+    screen: 'HOME',
+    playerData: null,
+    gameResult: null,
+    settings: {
+        effects: true,
+        sound: true,
+        controls: 'auto',
+        resolution: 1.0, // Quality scaler
+        uiScale: 1.0,    // NEW: UI Size scaler
+        mapSize: 'medium', // NEW: Map size preset
+        zoom: 1.0        // NEW: Camera Zoom
+    },
+    isMobile: ('ontouchstart' in window || navigator.maxTouchPoints > 0),
+    nextPlayerClass: null,
+    kda: { k: 0, d: 0, a: 0 }
+};
+
+const app = document.getElementById('app');
+
+function render() {
+    app.innerHTML = '';
+    if (state.screen === 'HOME') renderHome();
+    else if (state.screen === 'RULES') renderRules();
+    else if (state.screen === 'SETTINGS') renderSettings();
+    else if (state.screen === 'TEAM_SELECT') renderTeamSelect();
+    else if (state.screen === 'BATTLE') renderBattle();
+    else if (state.screen === 'GAMEOVER') renderGameOver();
+    lucide.createIcons();
+}
+
+function renderHome() {
+    app.innerHTML = `
+    <div class="flex flex-col items-center justify-center h-full bg-[#0f172a] text-slate-200 relative overflow-hidden">
+        <div class="absolute inset-0 opacity-10 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px]"></div>
+        <h1 class="text-6xl md:text-9xl font-black text-center mb-12 tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.1)] z-10 flex flex-col items-center">
+            FRONTLINE
+            <span class="text-blue-500 text-4xl md:text-6xl mt-[-10px] tracking-widest">GLOBAL WAR</span>
+        </h1>
+        <div class="flex flex-col gap-4 w-80 z-10">
+            <button onclick="setState('TEAM_SELECT'); AudioSys.init();" class="py-5 bg-blue-600 rounded-sm font-black text-2xl hover:bg-blue-500 transition-all flex items-center justify-center gap-3 shadow-lg border-l-4 border-white text-white">
+                <i data-lucide="play"></i> НАЧАТЬ БОЙ
+            </button>
+            <div class="flex gap-4">
+                <button onclick="setState('RULES')" class="flex-1 py-4 bg-slate-800 rounded-sm font-bold text-lg hover:bg-slate-700 flex items-center justify-center gap-2 border border-slate-700">
+                    <i data-lucide="book-open"></i> ИНФО
+                </button>
+                <button onclick="setState('SETTINGS')" class="flex-1 py-4 bg-slate-800 rounded-sm font-bold text-lg hover:bg-slate-700 flex items-center justify-center gap-2 border border-slate-700">
+                    <i data-lucide="settings"></i> ОПЦИИ
+                </button>
+            </div>
+        </div>
+        <div class="absolute bottom-8 text-slate-500 text-sm font-mono z-10">TACTICAL SIMULATOR v8.0</div>
+    </div>
+    `;
+}
+
+function renderRules() {
+    app.innerHTML = `
+    <div class="flex flex-col h-full p-8 bg-[#0f172a] text-slate-200 overflow-y-auto">
+        <h2 class="text-4xl font-black text-white mb-8 border-b border-slate-700 pb-4">ИНСТРУКТАЖ</h2>
+        <div class="flex-1 space-y-8 text-lg max-w-4xl mx-auto w-full">
+            <section class="bg-slate-800/50 p-6 rounded-lg border border-slate-700">
+                <h3 class="font-black text-2xl text-blue-400 mb-4 flex items-center gap-2"><i data-lucide="info"></i> СУТЬ ИГРЫ</h3>
+                <p class="text-slate-300">Тактический шутер 20x20. <br><strong>Победа:</strong> Уничтожьте все вражеские точки (Сапёром) ИЛИ убейте всех врагов. <br><strong>Поражение:</strong> Ваша команда уничтожена или все ваши точки взорваны.</p>
+            </section>
+        </div>
+        <button onclick="setState('HOME')" class="mt-6 py-3 px-12 bg-white text-black font-black rounded-sm hover:bg-gray-200 self-center">НАЗАД В МЕНЮ</button>
+    </div>
+    `;
+}
+
+function renderSettings() {
+    app.innerHTML = `
+    <div class="flex flex-col h-full p-8 bg-[#0f172a] text-slate-200 items-center justify-center overflow-y-auto">
+        <h2 class="text-4xl font-black text-white mb-8">НАСТРОЙКИ</h2>
+        <div class="space-y-4 w-full max-w-md">
+            <!-- Качество -->
+            <div class="flex flex-col gap-2 p-4 bg-slate-800 rounded-lg border border-slate-600">
+                <span class="font-bold">Качество (FPS)</span>
+                <div class="flex gap-2">
+                    <button onclick="changeSetting('resolution', 0.5)" class="flex-1 py-2 ${state.settings.resolution===0.5?'bg-blue-600':'bg-slate-700'} rounded text-xs">НИЗ</button>
+                    <button onclick="changeSetting('resolution', 0.75)" class="flex-1 py-2 ${state.settings.resolution===0.75?'bg-blue-600':'bg-slate-700'} rounded text-xs">СРЕД</button>
+                    <button onclick="changeSetting('resolution', 1.0)" class="flex-1 py-2 ${state.settings.resolution===1.0?'bg-blue-600':'bg-slate-700'} rounded text-xs">ВЫС</button>
+                </div>
+            </div>
+
+            <!-- Размер Карты -->
+            <div class="flex flex-col gap-2 p-4 bg-slate-800 rounded-lg border border-slate-600">
+                <span class="font-bold">Размер Карты</span>
+                <div class="flex gap-2">
+                    <button onclick="changeSetting('mapSize', 'small')" class="flex-1 py-2 ${state.settings.mapSize==='small'?'bg-blue-600':'bg-slate-700'} rounded text-xs">S (Мясо)</button>
+                    <button onclick="changeSetting('mapSize', 'medium')" class="flex-1 py-2 ${state.settings.mapSize==='medium'?'bg-blue-600':'bg-slate-700'} rounded text-xs">M (Норм)</button>
+                    <button onclick="changeSetting('mapSize', 'large')" class="flex-1 py-2 ${state.settings.mapSize==='large'?'bg-blue-600':'bg-slate-700'} rounded text-xs">L (Поля)</button>
+                </div>
+            </div>
+
+            <!-- Масштаб Камеры (Zoom) -->
+            <div class="flex flex-col gap-2 p-4 bg-slate-800 rounded-lg border border-slate-600">
+                <div class="flex justify-between"><span class="font-bold">Обзор Камеры</span> <span class="text-xs text-blue-300">${Math.round(state.settings.zoom*100)}%</span></div>
+                <input type="range" min="0.6" max="1.4" step="0.1" value="${state.settings.zoom}" oninput="changeSetting('zoom', parseFloat(this.value))" class="w-full">
+                <div class="flex justify-between text-[10px] text-slate-400"><span>Далеко</span><span>Близко</span></div>
+            </div>
+
+            <!-- Размер UI -->
+            <div class="flex flex-col gap-2 p-4 bg-slate-800 rounded-lg border border-slate-600">
+                <div class="flex justify-between"><span class="font-bold">Размер Интерфейса</span> <span class="text-xs text-blue-300">${Math.round(state.settings.uiScale*100)}%</span></div>
+                <input type="range" min="0.7" max="1.5" step="0.1" value="${state.settings.uiScale}" oninput="changeSetting('uiScale', parseFloat(this.value))" class="w-full">
+            </div>
+
+            <!-- Управление -->
+            <div class="flex flex-col gap-2 p-4 bg-slate-800 rounded-lg border border-slate-600">
+                <span class="font-bold">Управление</span>
+                <div class="flex gap-2">
+                    <button onclick="changeSetting('controls', 'auto')" class="flex-1 py-2 ${state.settings.controls==='auto'?'bg-blue-600':'bg-slate-700'} rounded text-xs">АВТО</button>
+                    <button onclick="changeSetting('controls', 'pc')" class="flex-1 py-2 ${state.settings.controls==='pc'?'bg-blue-600':'bg-slate-700'} rounded text-xs">ПК</button>
+                    <button onclick="changeSetting('controls', 'touch')" class="flex-1 py-2 ${state.settings.controls==='touch'?'bg-blue-600':'bg-slate-700'} rounded text-xs">СЕНСОР</button>
+                </div>
+            </div>
+
+            <!-- Переключатели -->
+            <div class="flex gap-4">
+                <button onclick="toggleEffects()" class="flex-1 py-3 bg-slate-800 border border-slate-600 rounded flex justify-between px-4 items-center">
+                    <span>Эффекты</span>
+                    <div class="w-4 h-4 rounded-full ${state.settings.effects?'bg-green-500':'bg-red-500'}"></div>
+                </button>
+                <button onclick="toggleSound()" class="flex-1 py-3 bg-slate-800 border border-slate-600 rounded flex justify-between px-4 items-center">
+                    <span>Звук</span>
+                    <div class="w-4 h-4 rounded-full ${state.settings.sound?'bg-green-500':'bg-red-500'}"></div>
+                </button>
+            </div>
+        </div>
+        <button onclick="setState('HOME')" class="mt-8 py-3 px-12 bg-white text-black font-black rounded-sm">ГОТОВО</button>
+    </div>
+    `;
+}
+
+function changeSetting(key, val) {
+    state.settings[key] = val;
+    render();
+}
+
+let selection = { country: COUNTRIES[0], enemy: COUNTRIES[1], classType: CLASSES[0] };
+
+function renderTeamSelect() {
+    // Same as before but kept concise
+    const renderGrid = (items, type) => items.map(item => {
+        let isActive = false;
+        if(type === 'country') isActive = selection.country.id === item.id;
+        if(type === 'enemy') isActive = selection.enemy.id === item.id;
+        if(type === 'class') isActive = selection.classType.id === item.id;
+        const borderClass = isActive
+            ? (type === 'enemy' ? 'border-red-500 bg-red-900/20' : (type === 'class' ? 'border-yellow-500 bg-yellow-900/20' : 'border-blue-500 bg-blue-900/20'))
+            : 'border-slate-700 bg-slate-800 hover:bg-slate-700';
+        let content = type === 'class' ? `<div class="${isActive?'text-yellow-500':'text-slate-500'}"><i data-lucide="${item.icon}"></i></div><div class="font-bold text-[10px] uppercase">${item.name}</div>` : `<span class="text-4xl grayscale-[0.1]">${item.flag}</span><span class="font-bold text-[10px] uppercase">${item.id}</span>`;
+        return `<button onclick="selectItem('${type}', '${item.id}')" class="p-2 rounded border flex flex-col items-center justify-center gap-1 transition-all ${borderClass}">${content}</button>`;
+    }).join('');
+
+    app.innerHTML = `
+    <div class="flex flex-col h-full p-4 md:p-8 bg-[#0f172a] text-slate-200">
+        <div class="flex justify-between items-center mb-4 border-b border-slate-700 pb-2">
+            <h1 class="text-3xl font-black text-white">ДИСЛОКАЦИЯ</h1>
+            <button onclick="setState('HOME')" class="text-sm font-bold text-slate-500 hover:text-white">ОТМЕНА</button>
+        </div>
+        <div class="flex-1 flex flex-col lg:flex-row gap-6 overflow-y-auto">
+            <div class="flex-1 space-y-2">
+                <h2 class="text-lg font-bold text-blue-400 flex items-center gap-2"><i data-lucide="shield"></i> ВАША ФРАКЦИЯ</h2>
+                <div class="grid grid-cols-4 gap-2">${renderGrid(COUNTRIES, 'country')}</div>
+            </div>
+            <div class="flex-1 space-y-2">
+                <h2 class="text-lg font-bold text-yellow-400 flex items-center gap-2"><i data-lucide="target"></i> ОПЕРАТИВНИК</h2>
+                <div class="grid grid-cols-3 gap-2">${renderGrid(CLASSES, 'class')}</div>
+            </div>
+            <div class="flex-1 space-y-2">
+                <h2 class="text-lg font-bold text-red-400 flex items-center gap-2"><i data-lucide="swords"></i> ПРОТИВНИК</h2>
+                <div class="grid grid-cols-4 gap-2">${renderGrid(COUNTRIES, 'enemy')}</div>
+            </div>
+        </div>
+        <button onclick="startBattle()" class="mt-4 w-full py-4 bg-white text-black rounded-sm font-black text-2xl uppercase shadow-xl hover:bg-gray-200">В БОЙ</button>
+    </div>
+    `;
+}
+
+function renderGameOver() {
+    const isWin = state.gameResult.winner === 'friendly';
+    app.innerHTML = `
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/95 backdrop-blur-lg">
+        <div class="text-center p-12 max-w-2xl w-full border-y-4 border-white bg-zinc-900">
+            <h2 class="text-8xl font-black mb-6 tracking-tighter ${isWin ? 'text-blue-500' : 'text-red-600'}">
+                ${isWin ? 'VICTORY' : 'DEFEAT'}
+            </h2>
+            <div class="flex justify-center gap-8 mb-8 text-xl font-bold bg-zinc-800 p-4 rounded">
+                <div class="text-green-400">K: ${state.kda.k}</div>
+                <div class="text-red-400">D: ${state.kda.d}</div>
+                <div class="text-blue-400">A: ${state.kda.a}</div>
+            </div>
+            <button onclick="setState('HOME')" class="px-16 py-4 bg-white text-black font-black text-xl hover:bg-gray-300 transition-colors uppercase">ГЛАВНОЕ МЕНЮ</button>
+        </div>
+    </div>
+    `;
+}
+
+function renderBattle() {
+    const showMobile = state.settings.controls === 'touch' || (state.settings.controls === 'auto' && state.isMobile);
+    const uiScale = state.settings.uiScale;
+
+    app.innerHTML = `
+    <div class="relative w-full h-full bg-[#2a2620] cursor-crosshair overflow-hidden">
+        <canvas id="gameCanvas" class="block w-full h-full"></canvas>
+
+        <!-- Scalable UI Layer -->
+        <div class="ui-layer" style="transform: scale(${uiScale})">
+
+            <!-- HUD LEFT -->
+            <div class="ui-element absolute top-4 left-4 flex flex-col gap-2 select-none z-10 origin-top-left">
+                <div class="bg-stone-900/80 backdrop-blur text-white p-3 rounded-lg border border-stone-700 shadow-lg w-48">
+                    <div class="text-2xl font-black text-orange-500" id="hud-hp">100 HP</div>
+                    <div class="w-full h-2 bg-stone-800 mt-1 rounded"><div id="hud-hp-bar" class="h-full bg-orange-600 rounded" style="width: 100%"></div></div>
+                </div>
+                <div class="bg-stone-900/80 backdrop-blur text-white p-3 rounded-lg border border-stone-700 shadow-lg">
+                    <div class="text-xl font-bold" id="hud-weapon">Weapon</div>
+                    <div class="text-3xl font-mono text-stone-400"><span id="hud-mag">30</span> <span class="text-sm text-stone-600">/ <span id="hud-res">120</span></span></div>
+                </div>
+                <div id="hud-hint" class="hidden bg-orange-600 text-white p-3 rounded-lg animate-pulse font-bold text-center shadow-lg border border-orange-400">
+                    УДЕРЖИВАЙТЕ [E]
+                </div>
+            </div>
+
+            <!-- HUD CENTER (KDA) -->
+            <div class="ui-element absolute top-4 left-1/2 -translate-x-1/2 flex flex-col gap-2 select-none z-10">
+                 <div class="bg-stone-900/80 backdrop-blur text-white p-2 px-4 rounded-lg border border-stone-700 shadow-lg flex gap-4 font-mono font-bold">
+                    <span class="text-green-400">K: <span id="hud-k">0</span></span>
+                    <span class="text-red-400">D: <span id="hud-d">0</span></span>
+                    <span class="text-blue-400">A: <span id="hud-a">0</span></span>
+                </div>
+            </div>
+
+            <!-- PAUSE BTN -->
+            <div class="ui-element absolute top-4 right-4 flex gap-2 z-20 origin-top-right">
+                <button onclick="togglePause()" class="w-10 h-10 bg-stone-900/80 backdrop-blur border border-stone-600 rounded-lg flex items-center justify-center hover:bg-stone-800 text-white"><i data-lucide="pause"></i></button>
+            </div>
+
+            <!-- PAUSE MENU -->
+            <div id="pause-menu" class="hidden ui-element fixed inset-0 flex items-center justify-center z-50 pointer-events-auto">
+                 <div class="bg-black/90 p-8 rounded-2xl border-2 border-[#b8a37e] text-center w-80 shadow-2xl">
+                    <h2 class="text-4xl font-black text-[#b8a37e] mb-8">ПАУЗА</h2>
+                    <div class="flex flex-col gap-4">
+                        <button onclick="togglePause()" class="py-4 bg-[#3d362b] border border-[#b8a37e] rounded-xl font-bold text-white">ПРОДОЛЖИТЬ</button>
+                        <button onclick="restartBattle()" class="py-4 bg-[#1f1b16] border border-[#6b5e49] rounded-xl font-bold text-[#d6cbb6]">ПЕРЕСОЗДАТЬ</button>
+                        <button onclick="setState('HOME')" class="py-4 bg-[#1f1b16] border border-[#6b5e49] rounded-xl font-bold text-red-400">В МЕНЮ</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- RESPAWN MENU -->
+            <div id="respawn-menu" class="hidden ui-element fixed inset-0 flex flex-col items-center justify-center z-50 pointer-events-auto">
+                 <div class="bg-black/90 p-8 rounded-xl border border-red-900 text-center">
+                    <h2 class="text-4xl font-black text-red-500 mb-4">ВЫ ПОГИБЛИ</h2>
+                    <div class="grid grid-cols-4 gap-2 mb-4" id="respawn-classes"></div>
+                    <div class="text-stone-500 font-mono" id="respawn-timer">...</div>
+                </div>
+            </div>
+
+        </div> <!-- End UI Layer -->
+
+        <!-- MOBILE CONTROLS (Manual Scaling applied to style to ensure position accuracy) -->
+        <div id="mobile-controls" class="${showMobile ? '' : 'hidden'} absolute inset-0 pointer-events-none z-40" style="transform: scale(${uiScale}); transform-origin: bottom left;">
+            <!-- JOYSTICK AREA -->
+            <div id="joystick-base" class="pointer-events-auto origin-bottom-left">
+                <div id="joystick-stick"></div>
+            </div>
+        </div>
+
+        <div id="mobile-actions" class="${showMobile ? '' : 'hidden'} absolute bottom-8 right-8 flex flex-col items-end gap-4 pointer-events-auto z-40" style="transform: scale(${uiScale}); transform-origin: bottom right;">
+            <div class="flex gap-4 items-end mr-4">
+                <button id="btn-reload" class="control-btn w-14 h-14 bg-stone-800/50"><i data-lucide="refresh-cw" size="24"></i></button>
+                <button id="btn-swap" class="control-btn w-14 h-14 bg-stone-800/50"><i data-lucide="rotate-ccw" size="24"></i></button>
+            </div>
+            <div class="flex gap-6 items-center">
+                <button id="btn-action" class="control-btn w-16 h-16 bg-yellow-600/40 border-yellow-500 hidden animate-pulse"><i data-lucide="hand" size="28"></i></button>
+                <button id="btn-fire" class="control-btn btn-fire w-24 h-24 shadow-xl"><i data-lucide="crosshair" size="40"></i></button>
+            </div>
+        </div>
+
+    </div>
+    `;
+
+    if(showMobile) initMobileControls();
+    initGameLoop();
+}
+
+function initMobileControls() {
+    const stickBase = document.getElementById('joystick-base');
+    const stick = document.getElementById('joystick-stick');
+    const buttons = ['btn-fire','btn-swap','btn-reload','btn-action'];
+
+    let joyTouchId = null;
+    let joyCenter = {x:0, y:0};
+
+    stickBase.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        joyTouchId = touch.identifier;
+        const rect = stickBase.getBoundingClientRect();
+        joyCenter = { x: rect.left + rect.width/2, y: rect.top + rect.height/2 };
+        updateJoystick(touch.clientX, touch.clientY);
+    });
+
+    stickBase.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        for(let i=0; i<e.changedTouches.length; i++) {
+            if(e.changedTouches[i].identifier === joyTouchId) {
+                updateJoystick(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+                break;
+            }
+        }
+    });
+
+    const endJoystick = (e) => {
+        e.preventDefault();
+        for(let i=0; i<e.changedTouches.length; i++) {
+            if(e.changedTouches[i].identifier === joyTouchId) {
+                joyTouchId = null;
+                stick.style.transform = `translate(-50%, -50%)`;
+                window.inputs.move = {x:0, y:0};
+                break;
+            }
+        }
+    };
+    stickBase.addEventListener('touchend', endJoystick);
+    stickBase.addEventListener('touchcancel', endJoystick);
+
+    function updateJoystick(cx, cy) {
+        // We must account for the scale factor when calculating distance/position
+        const scale = state.settings.uiScale;
+        const maxDist = 40 * scale;
+
+        let dx = cx - joyCenter.x;
+        let dy = cy - joyCenter.y;
+        const dist = Math.hypot(dx, dy);
+
+        let nx = dx, ny = dy;
+        if(dist > maxDist) {
+            const ratio = maxDist/dist;
+            nx = dx * ratio;
+            ny = dy * ratio;
+        }
+
+        // CSS transform handles the display, we just set relative px (screen space)
+        // Actually, since stick is inside scaled container, we should use unscaled logic locally or simple percentage
+        // Simplest: Just use visual clamp logic
+        stick.style.transform = `translate(calc(-50% + ${nx/scale}px), calc(-50% + ${ny/scale}px))`;
+
+        window.inputs.move = {
+            x: Math.max(-1, Math.min(1, dx / maxDist)),
+            y: Math.max(-1, Math.min(1, dy / maxDist))
+        };
+    }
+
+    buttons.forEach(id => {
+        const el = document.getElementById(id);
+        if(!el) return;
+        el.addEventListener('touchstart', (e) => {
+            e.preventDefault(); el.classList.add('active');
+            if(id==='btn-fire') window.inputs.shootPressed=true;
+            if(id==='btn-swap') window.inputs.swap=true;
+            if(id==='btn-reload') window.inputs.reload=true;
+            if(id==='btn-action') window.inputs.keys.e=true;
+        });
+        el.addEventListener('touchend', (e) => {
+            e.preventDefault(); el.classList.remove('active');
+            if(id==='btn-fire') window.inputs.shootPressed=false;
+            if(id==='btn-action') window.inputs.keys.e=false;
+        });
+    });
+}
+
+function setState(s) { state.screen = s; render(); }
+function toggleEffects() { state.settings.effects = !state.settings.effects; render(); }
+function toggleSound() { state.settings.sound = !state.settings.sound; AudioSys.enabled = state.settings.sound; render(); }
+
+function selectItem(type, id) {
+    if(type === 'country') selection.country = COUNTRIES.find(c => c.id === id);
+    if(type === 'enemy') selection.enemy = COUNTRIES.find(c => c.id === id);
+    if(type === 'class') selection.classType = CLASSES.find(c => c.id === id);
+    render();
+}
+
+function startBattle() {
+    const size = state.settings.mapSize;
+    if(size === 'small') { worldWidth=2000; worldHeight=2000; }
+    else if(size === 'medium') { worldWidth=3200; worldHeight=2500; }
+    else { worldWidth=5000; worldHeight=4000; }
+
+    const loadout = getLoadout(selection.country.id, selection.classType.id);
+    state.playerData = { country: selection.country, classType: selection.classType, weapons: loadout, enemyCountry: selection.enemy };
+    state.kda = { k: 0, d: 0, a: 0 };
+    setState('BATTLE');
+}
+
+function restartBattle() {
+    if (state.playerData) {
+        state.playerData.weapons = getLoadout(state.playerData.country.id, state.playerData.classType.id);
+        state.kda = { k: 0, d: 0, a: 0 };
+        setState('BATTLE');
+    }
+}
+
+let gameLoopId;
+let isPaused = false;
+function togglePause() { isPaused = !isPaused; document.getElementById('pause-menu').classList.toggle('hidden', !isPaused); }
+
+function initGameLoop() {
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const resize = () => {
+        const q = state.settings.resolution;
+        canvas.width = window.innerWidth * q; canvas.height = window.innerHeight * q;
+    };
+    window.addEventListener('resize', resize);
+    resize();
+
+    const world = generateWorld();
+    const dynamicObjects = [];
+    let entities = [];
+    let bullets = [];
+    let particles = [];
+    const camera = { x: 0, y: 0, shake: 0 };
+
+    window.inputs = { move: { x: 0, y: 0 }, aim: { x: 0, y: 0 }, keys: { w: false, a: false, s: false, d: false, q: false, e: false, r: false, space: false }, shoot: false, swap: false, reload: false, shootPressed: false };
+
+    const handleMouseMove = (e) => { window.inputs.aim = { x: e.clientX, y: e.clientY }; };
+    const handleMouseDown = () => { window.inputs.shootPressed = true; if(window.inputs.reload) window.inputs.reload=false; };
+    const handleMouseUp = () => { window.inputs.shootPressed = false; };
+    const handleKeyDown = (e) => { const k=e.key.toLowerCase(); if(window.inputs.keys.hasOwnProperty(k)) window.inputs.keys[k]=true; if(k==='q') window.inputs.swap=true; if(k==='r') window.inputs.reload=true; };
+    const handleKeyUp = (e) => { const k=e.key.toLowerCase(); if(window.inputs.keys.hasOwnProperty(k)) window.inputs.keys[k]=false; };
+    window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mousedown', handleMouseDown); window.addEventListener('mouseup', handleMouseUp); window.addEventListener('keydown', handleKeyDown); window.addEventListener('keyup', handleKeyUp);
+
+    const TEAM_SIZE = state.settings.mapSize==='small'?12 : (state.settings.mapSize==='large'?30:20);
+
+    const canSpawnAt = (x,y,r) => {
+        if(x<0 || x>worldWidth || y<0 || y>worldHeight) return false;
+        for(let o of world.obstacles) if(x+r>o.x && x-r<o.x+o.w && y+r>o.y && y-r<o.y+o.h) return false;
+        for(let e of entities) if(Math.hypot(e.x-x, e.y-y) < e.radius+r) return false;
+        return true;
+    };
+
+    const spawnEntity = (team, role, isPlayer) => {
+        const isFriendly = team === 'friendly';
+        const cData = isFriendly ? state.playerData.country : state.playerData.enemyCountry;
+        let cls = CLASSES.find(c=>c.id===role) || CLASSES[0];
+        if (isPlayer && state.nextPlayerClass) { cls = state.nextPlayerClass; state.nextPlayerClass=null; }
+        const loadout = getLoadout(cData.id, cls.id);
+        let sx, sy, att=0;
+        do {
+            sy = isFriendly ? worldHeight-250+(Math.random()*100-50) : 250+(Math.random()*100-50);
+            sx = worldWidth/2 + (Math.random()*800-400);
+            att++;
+        } while(!canSpawnAt(sx, sy, 18) && att<50);
+        return {
+            id: Math.random().toString(), type: isPlayer?'player':'bot', team, country: cData, class: cls.id, role: cls.id,
+            x: sx, y: sy, angle: isFriendly?-Math.PI/2:Math.PI/2, hp: cls.hp, maxHp: cls.hp, speed: cls.speed, radius: 18,
+            weapons: loadout, activeWeaponIdx: 0, state: 'idle', shieldActive: false, plantProgress: 0, hitFlash: 0,
+            aiTimer: Math.floor(Math.random()*100), buildCooldown: 0, stuckCounter: 0, aiMoveVec: {x:0,y:0}, aiStateTime: 0, supplyStock: 1, lastHitBy: null
+        };
+    };
+
+    entities.push(spawnEntity('friendly', state.playerData.classType.id, true));
+    entities.push(spawnEntity('friendly', 'miner', false));
+    ['builder','medic','grenadier','supplier','supplier'].forEach(r => entities.push(spawnEntity('friendly', r, false)));
+    for(let i=0;i<TEAM_SIZE-7;i++) entities.push(spawnEntity('friendly', 'assault', false));
+    entities.push(spawnEntity('enemy', 'miner', false));
+    ['builder','medic','grenadier','supplier','supplier'].forEach(r => entities.push(spawnEntity('enemy', r, false)));
+    for(let i=0;i<TEAM_SIZE-6;i++) entities.push(spawnEntity('enemy', 'assault', false));
+
+    const update = () => {
+        if(isPaused) return;
+        const player = entities.find(e=>e.type==='player');
+
+        if(player) {
+            const wpn = player.weapons[player.activeWeaponIdx];
+            if(window.inputs.swap) { player.activeWeaponIdx = (player.activeWeaponIdx+1)%player.weapons.length; window.inputs.swap=false; player.weapons.forEach(w=>{w.isReloading=false; w.reloadProgress=0;}); }
+            if(window.inputs.reload && !wpn.isReloading && wpn.currentMag < wpn.ammo && wpn.reserveAmmo > 0) { wpn.isReloading=true; wpn.reloadProgress=0; window.inputs.reload=false; AudioSys.play('reload'); }
+            const respawnDiv = document.getElementById('respawn-menu');
+            if (player.hp <= 0) {
+                respawnDiv.classList.remove('hidden');
+                document.getElementById('respawn-timer').innerText = `ВОЗРОЖДЕНИЕ ЧЕРЕЗ ${(player.respawnTimer/60).toFixed(1)} СЕК...`;
+                if(respawnDiv.innerHTML.indexOf('onclick') === -1) {
+                    document.getElementById('respawn-classes').innerHTML = CLASSES.map(c => `<button onclick="window.setNextClass('${c.id}')" class="p-2 bg-stone-800 border border-stone-600 rounded text-white text-xs hover:bg-blue-600">${c.name}</button>`).join('');
+                }
+            } else respawnDiv.classList.add('hidden');
+            document.getElementById('hud-k').innerText = state.kda.k; document.getElementById('hud-d').innerText = state.kda.d; document.getElementById('hud-a').innerText = state.kda.a;
+        }
+
+        world.bombSpots.forEach(b => {
+            if(b.timer>0) {
+                b.timer--;
+                if(b.timer<=0 && b.active) {
+                    b.active=false; camera.shake=50; AudioSys.play('explode', 1.5);
+                    entities.forEach(en => { if(Math.hypot(en.x-b.x, en.y-b.y)<300) en.hp-=300; });
+                    if(state.settings.effects) for(let k=0;k<60;k++) particles.push({x: b.x, y: b.y, vx:(Math.random()-.5)*25, vy:(Math.random()-.5)*25, life:3, color: k%2===0?'#f97316':'#000', size:12});
+                }
+            }
+        });
+
+        entities.forEach(e => {
+            if(e.hitFlash>0) e.hitFlash--;
+            if(e.buildCooldown>0) e.buildCooldown--;
+            const wpn = e.weapons[e.activeWeaponIdx];
+            if(wpn.isReloading) {
+                wpn.reloadProgress++;
+                if(wpn.reloadProgress >= (wpn.reload||120)) {
+                    const need = wpn.ammo - wpn.currentMag;
+                    const take = Math.min(need, wpn.reserveAmmo);
+                    wpn.currentMag+=take; wpn.reserveAmmo-=take;
+                    wpn.isReloading=false; wpn.reloadProgress=0;
+                }
+            }
+
+            if(e.hp<=0) {
+                if(!e.respawnTimer) { e.respawnTimer=300; if(e.type === 'player') state.kda.d++; }
+                e.respawnTimer--;
+                if(e.respawnTimer<=0) {
+                    if(e.type==='player') Object.assign(e, spawnEntity(e.team, state.nextPlayerClass?state.nextPlayerClass.id:e.role, true));
+                    else Object.assign(e, spawnEntity(e.team, e.role, false));
+                }
+                return;
+            }
+
+            let mx=0, my=0, wantShoot=false, desiredAngle=e.angle, isPlanting=false;
+            if(e.type==='player') {
+                if(window.inputs.keys.w || window.inputs.move.y<-0.1) my=-1; if(window.inputs.keys.s || window.inputs.move.y>0.1) my=1;
+                if(window.inputs.keys.a || window.inputs.move.x<-0.1) mx=-1; if(window.inputs.keys.d || window.inputs.move.x>0.1) mx=1;
+                const showMobile = state.settings.controls === 'touch' || (state.settings.controls === 'auto' && state.isMobile);
+                if(showMobile && (mx!==0 || my!==0)) desiredAngle = Math.atan2(my, mx);
+                else if(!showMobile) desiredAngle = Math.atan2((window.inputs.aim.y + camera.y) - e.y*state.settings.zoom, (window.inputs.aim.x + camera.x) - e.x*state.settings.zoom); // Fix mouse aim with zoom (approximation, fixed in draw)
+
+                // Mouse Fix Logic: We need to reverse the transform.
+                // MouseX + CamX is WorldX only if Scale is 1. If Scale is Z:
+                if(!showMobile) {
+                    // VirtualScreenX = MouseX / Q
+                    // WorldX = (VirtualScreenX / Zoom) + CamX
+                    const q = state.settings.resolution;
+                    const z = state.settings.zoom;
+                    const vx = window.inputs.aim.x / q;
+                    const vy = window.inputs.aim.y / q;
+                    const wx = (vx / z) + camera.x;
+                    const wy = (vy / z) + camera.y;
+                    desiredAngle = Math.atan2(wy - e.y, wx - e.x);
+                }
+
+                wantShoot = (window.inputs.shootPressed || window.inputs.keys.space) && !wpn.isReloading;
+                if(wantShoot && window.inputs.reload) window.inputs.reload = false;
+
+                const nearestDepot = world.depots.find(d => d.team === e.team && Math.hypot(d.x - e.x, d.y - e.y) < 60);
+                let supplyHint = !!nearestDepot;
+                if(nearestDepot && window.inputs.keys.e) { e.weapons.forEach(w => { if(w.type!=='supply') w.reserveAmmo=w.total; }); particles.push({x:e.x, y:e.y, vx:0, vy:-1, life:1, color:'#ffff00', size:5, isText: '+AMMO'}); AudioSys.play('reload'); }
+
+                let plantHint = false, buildHint = false, buildReady = false;
+                if(e.class==='miner') {
+                    const spot = world.bombSpots.find(b=>b.team!==e.team && b.active && b.timer===0 && Math.hypot(e.x-b.x, e.y-b.y)<60);
+                    if(spot) { plantHint=true; if(window.inputs.keys.e) { isPlanting=true; e.shieldActive=true; e.plantProgress++; if(e.plantProgress>=180) { spot.timer=180; e.plantProgress=0; AudioSys.play('reload'); } } else { e.plantProgress=Math.max(0, e.plantProgress-5); e.shieldActive=false; } } else { e.plantProgress=0; e.shieldActive=false; }
+                } else if (e.class==='builder') {
+                    if(e.buildCooldown<=0) { buildHint=true; buildReady=true; if(window.inputs.keys.e) { const bx = e.x + Math.cos(e.angle)*40; const by = e.y + Math.sin(e.angle)*40; let free=true; [...world.obstacles, ...dynamicObjects].forEach(o=>{ if(bx>o.x-20 && bx<o.x+o.w+20 && by>o.y-20 && by<o.y+o.h+20) free=false; }); if(free) { dynamicObjects.push({x:bx-40, y:by-10, w:80, h:20, type:'wall'}); e.buildCooldown=300; particles.push({x:bx, y:by, vx:0, vy:0, life:0.5, color:'#fff', size:5}); } } } else { buildHint=true; buildReady=false; }
+                } else { e.shieldActive=false; }
+                document.getElementById('hud-hp').innerText = Math.floor(e.hp) + ' HP'; document.getElementById('hud-hp-bar').style.width = Math.max(0, (e.hp/e.maxHp)*100) + '%';
+                document.getElementById('hud-weapon').innerText = wpn.name; document.getElementById('hud-mag').innerText = wpn.currentMag; document.getElementById('hud-res').innerText = wpn.reserveAmmo;
+                const hintEl = document.getElementById('hud-hint'); const btnAction = document.getElementById('btn-action');
+                if(plantHint || supplyHint || buildHint) { hintEl.classList.remove('hidden'); if(btnAction) btnAction.classList.remove('hidden'); if(plantHint) hintEl.innerText = "УДЕРЖИВАЙТЕ [E]"; else if(supplyHint) hintEl.innerText = "ПОПОЛНИТЬ [E]"; else if(buildHint) hintEl.innerText = buildReady?"СТРОИТЬ [E]":"ГОТОВИТСЯ..."; } else { hintEl.classList.add('hidden'); if(btnAction) btnAction.classList.add('hidden'); }
+            } else {
+                e.aiTimer++; if(e.aiStateTime>0) e.aiStateTime--;
+                const enemies = entities.filter(en => en.team !== e.team && en.hp > 0);
+                const friends = entities.filter(en => en.team === e.team && en.hp > 0 && en.id !== e.id);
+                let targetEnemy = null;
+                if(e.aiTimer%15===0) {
+                    const sorted = enemies.sort((a,b)=> Math.hypot(e.x-a.x, e.y-a.y) - Math.hypot(e.x-b.x, e.y-b.y));
+                    for(let en of sorted) {
+                        let visible=true; const dist = Math.hypot(en.x-e.x, en.y-e.y); const steps = dist/30; const dx = (en.x-e.x)/steps; const dy = (en.y-e.y)/steps;
+                        for(let i=1;i<steps;i++) { const cx = e.x+dx*i; const cy=e.y+dy*i; for(let o of [...world.obstacles, ...dynamicObjects]) { if(cx>o.x && cx<o.x+o.w && cy>o.y && cy<o.y+o.h) { visible=false; break; } } if(!visible) break; }
+                        if(visible) { targetEnemy=en; break; }
+                    }
+                    e.cachedTarget = targetEnemy;
+                }
+                const enemy = e.cachedTarget || enemies[0];
+                const dist = enemy ? Math.hypot(e.x-enemy.x, e.y-enemy.y) : 9999;
+                if (!wpn.isReloading && wpn.currentMag <= 0 && wpn.reserveAmmo > 0) { wpn.isReloading = true; wpn.reloadProgress = 0; AudioSys.play('reload'); }
+                if(e.class==='supplier' && e.aiTimer%5===0) { const lx = e.x+Math.cos(e.angle)*70; const ly=e.y+Math.sin(e.angle)*70; let blocked=false; for(let o of [...world.obstacles, ...dynamicObjects]) if(lx>o.x && lx<o.x+o.w && ly>o.y && ly<o.y+o.h) blocked=true; if(blocked) { e.aiStateTime=30; e.aiVec={x:Math.cos(e.angle+1.5), y:Math.sin(e.angle+1.5)}; } }
+                const moved = Math.abs(e.x-(e.lx||e.x))>1 || Math.abs(e.y-(e.ly||e.y))>1; e.lx=e.x; e.ly=e.y;
+                if(!moved && e.aiStateTime<=0 && e.class!=='miner' && e.class!=='builder') e.stuckC=(e.stuckC||0)+1; else e.stuckC=Math.max(0,(e.stuckC||0)-1);
+                if(e.stuckC>20) { e.aiStateTime=60; const ang=Math.random()*6.28; e.aiVec={x:Math.cos(ang), y:Math.sin(ang)}; e.stuckC=0; }
+                if(e.aiStateTime>0) { mx=e.aiVec.x; my=e.aiVec.y; desiredAngle=Math.atan2(my, mx); } else {
+                    let dx=e.x, dy=e.y;
+                    if (e.class === 'supplier') { const needy = friends.find(f=>f.weapons[0].reserveAmmo < 30); if (needy && e.supplyStock>0) { if (Math.hypot(e.x-needy.x, e.y-needy.y)<60) { needy.weapons.forEach(w=>w.reserveAmmo=w.total); e.supplyStock--; AudioSys.play('reload'); } else { dx=needy.x; dy=needy.y; } } else { const dep = world.depots.find(d=>d.team===e.team); if (dep) { if(Math.hypot(e.x-dep.x, e.y-dep.y)<60) e.supplyStock=1; else { dx=dep.x; dy=dep.y; } } } }
+                    else if(e.class==='miner') { const t = world.bombSpots.find(b=>b.team!==e.team && b.active && b.timer===0); if(t) { if(Math.hypot(e.x-t.x, e.y-t.y)<20) { e.shieldActive=true; e.plantProgress++; if(e.plantProgress>=180) { t.timer=180; e.plantProgress=0; AudioSys.play('reload'); } mx=0; my=0; } else { e.shieldActive=false; dx=t.x; dy=t.y; } } }
+                    else if (e.class==='grenadier') { const line = e.team==='friendly'?worldHeight/2+400 : worldHeight/2-400; if(Math.abs(e.y-line)>50) { dx=e.x; dy=line; } else { if(Math.random()>0.95) e.aiVec={x:Math.random()-0.5, y:0}; mx=e.aiVec?e.aiVec.x:0; my=0; } if(enemy && dist<700) { desiredAngle=Math.atan2(enemy.y-e.y, enemy.x-e.x); wantShoot=true; } }
+                    else if (enemy) { if(dist>350) { dx=enemy.x; dy=enemy.y; } else { dx=e.x-(enemy.x-e.x); dy=e.y-(enemy.y-e.y); } }
+                    if(!isPlanting && e.aiStateTime<=0 && (mx===0 && my===0)) { const ang = Math.atan2(dy-e.y, dx-e.x); let sepX=0, sepY=0, count=0; for (let other of entities) { if (other !== e && other.hp > 0 && Math.hypot(e.x - other.x, e.y - other.y) < 40) { let d = Math.hypot(e.x - other.x, e.y - other.y); if (d === 0) d = 0.1; sepX += (e.x - other.x) / d; sepY += (e.y - other.y) / d; count++; } } if (count > 0) { mx = Math.cos(ang) + sepX * 0.8; my = Math.sin(ang) + sepY * 0.8; } else { mx=Math.cos(ang); my=Math.sin(ang); } if (enemy && dist < 600) { if (Math.random() > 0.9) e.aiStrafeDir = Math.random() > 0.5 ? 1 : -1; if (e.aiStrafeDir) { mx += Math.cos(ang + Math.PI/2) * e.aiStrafeDir * 0.5; my += Math.sin(ang + Math.PI/2) * e.aiStrafeDir * 0.5; } } if(!wantShoot) desiredAngle=ang; }
+                }
+                if(enemy && dist<wpn.range && !wpn.isReloading) { desiredAngle = Math.atan2(enemy.y-e.y, enemy.x-e.x); wantShoot=true; }
+            }
+
+            let spd = e.speed; if(e.shieldActive || wpn.isReloading) spd*=0.5;
+            if(mx!==0 || my!==0) {
+                const lookAhead = 50; const lookX = e.x + mx * lookAhead; const lookY = e.y + my * lookAhead; let wallAhead = false; for(let o of [...world.obstacles, ...dynamicObjects]) { if(lookX>o.x && lookX<o.x+o.w && lookY>o.y && lookY<o.y+o.h) { wallAhead=true; break; } }
+                if(wallAhead) { const ang = Math.atan2(my, mx) + (Math.random() > 0.5 ? 1.5 : -1.5); mx = Math.cos(ang); my = Math.sin(ang); }
+                const l = Math.hypot(mx, my); mx/=l; my/=l;
+                let nx=e.x+mx*spd; let col=false; if(nx<0||nx>worldWidth) col=true; if(!col) for(let o of [...world.obstacles, ...dynamicObjects]) if(nx>o.x-18 && nx<o.x+o.w+18 && e.y>o.y-18 && e.y<o.y+o.h+18) col=true; if(!col) e.x=nx;
+                let ny=e.y+my*spd; col=false; if(ny<0||ny>worldHeight) col=true; if(!col) for(let o of [...world.obstacles, ...dynamicObjects]) if(e.x>o.x-18 && e.x<o.x+o.w+18 && ny>o.y-18 && ny<o.y+o.h+18) col=true; if(!col) e.y=ny;
+                for(let o of [...world.obstacles, ...dynamicObjects]) { const cx = Math.max(o.x, Math.min(e.x, o.x + o.w)); const cy = Math.max(o.y, Math.min(e.y, o.y + o.h)); const d = Math.hypot(e.x-cx, e.y-cy); if (d < e.radius + 5) { const pen = (e.radius + 5) - d; if (d>0) { e.x += (e.x-cx)/d * pen; e.y += (e.y-cy)/d * pen; } } }
+            }
+
+            let diff = desiredAngle - e.angle; while (diff < -Math.PI) diff += Math.PI * 2; while (diff > Math.PI) diff -= Math.PI * 2; e.angle += diff * 0.15;
+
+            if(wantShoot && !wpn.isReloading && wpn.currentMag>0 && Date.now()-wpn.lastShot>wpn.rate) {
+                const spread = (Math.random()-0.5)*wpn.spread; const isG = wpn.type==='grenade'; const isH = wpn.type==='medkit';
+                // Bullet Logic for Zoom: Mouse aiming needs to be adjusted in the 'source' logic? No, we already fixed desiredAngle
+                bullets.push({ x:e.x, y:e.y, vx: Math.cos(e.angle+spread)*(isG?12:28), vy: Math.sin(e.angle+spread)*(isG?12:28), dmg: wpn.damage, range: wpn.range, team: e.team, traveled:0, type: wpn.type||'bullet', tDist: isG ? (e.type==='player'?Math.min(2000, wpn.range): 400) : 0, sourceId: e.id });
+                if(!isH) wpn.currentMag--; wpn.lastShot=Date.now(); AudioSys.play(isG?'shot_heavy':'shot');
+            }
+        });
+
+        for(let i=bullets.length-1; i>=0; i--) {
+            let b = bullets[i]; const sp = b.type==='grenade'?12:28; b.x+=b.vx; b.y+=b.vy; b.traveled+=sp;
+            let hitWall=false; for(let o of [...world.obstacles, ...dynamicObjects]) if(b.x>o.x && b.x<o.x+o.w && b.y>o.y && b.y<o.y+o.h) hitWall=true;
+            const hitEnd = b.type==='grenade' ? b.traveled>=b.tDist : b.traveled>b.range;
+
+            if(hitEnd || (hitWall && b.type!=='grenade')) {
+                if(b.type==='grenade') {
+                    if(state.settings.effects) particles.push({x:b.x, y:b.y, vx:0, vy:0, life:0.5, color:'#f59e0b', size:40});
+                    AudioSys.play('explode');
+                    entities.forEach(en=>{ if(Math.hypot(en.x-b.x, en.y-b.y)<120 && en.team!==b.team) { en.hp-=b.dmg; en.hitFlash=5; en.lastHitBy={id:b.sourceId, time:Date.now()}; if(en.hp<=0) { if(player && b.sourceId===player.id) state.kda.k++; else if(player && en.lastHitBy.id===player.id) state.kda.a++; } } });
+                    if(player && Math.hypot(player.x-b.x, player.y-b.y)<400) camera.shake=15;
+                } else particles.push({x:b.x, y:b.y, vx:0, vy:0, life:0.5, color:b.type==='medkit'?'#22c55e':'#ccc', size:b.type==='medkit'?5:2});
+                bullets.splice(i,1); continue;
+            }
+            if(b.type!=='grenade') {
+                for(let e of entities) {
+                    const isHeal = b.type==='medkit'; const tTeam = isHeal ? b.team : (b.team==='friendly'?'enemy':'friendly');
+                    if(e.hp>0 && e.team===tTeam && Math.hypot(b.x-e.x, b.y-e.y)<e.radius+10) {
+                        if(isHeal) { e.hp=Math.min(e.maxHp, e.hp-b.dmg); particles.push({x:b.x, y:b.y, vx:0, vy:0, life:0.5, color:'#22c55e', size:5}); }
+                        else {
+                            let dmg = b.dmg; if(e.shieldActive) { const ang = Math.atan2(b.vy, b.vx); if(Math.abs(ang-e.angle)>Math.PI/2) dmg*=0.1; particles.push({x:b.x, y:b.y, vx:0, vy:0, life:0.5, color:'#60a5fa', size:5}); } else if(state.settings.effects) particles.push({x:b.x, y:b.y, vx:b.vx*0.1, vy:b.vy*0.1, life:1, color:'#dc2626', size:4});
+                            e.lastHitBy = { id: b.sourceId, time: Date.now() }; e.hp-=dmg; e.hitFlash=5;
+                            if(e.hp <= 0 && player) { if(b.sourceId === player.id) state.kda.k++; else if(e.lastHitBy.id === player.id) state.kda.a++; }
+                            AudioSys.play('hit', 0.5); if(e.type==='player') camera.shake=5;
+                        }
+                        bullets.splice(i,1); break;
+                    }
+                }
+            }
+        }
+
+        if(player) {
+            const q = state.settings.resolution;
+            const z = state.settings.zoom;
+            // Visible world area = CanvasSize / (Quality * Zoom)
+            const vW = canvas.width / (q * z);
+            const vH = canvas.height / (q * z);
+
+            let tx=player.x-vW/2; let ty=player.y-vH/2;
+            tx = Math.max(0, Math.min(tx, worldWidth-vW));
+            ty = Math.max(0, Math.min(ty, worldHeight-vH));
+            camera.x+=(tx-camera.x)*0.1; camera.y+=(ty-camera.y)*0.1;
+            if(camera.shake>0) { camera.x+=(Math.random()-0.5)*camera.shake; camera.y+=(Math.random()-0.5)*camera.shake; camera.shake*=0.9; if(camera.shake<0.5) camera.shake=0; }
+        }
+
+        const friendAlive = entities.some(e=>e.team==='friendly' && e.hp>0);
+        const enemyAlive = entities.some(e=>e.team==='enemy' && e.hp>0);
+        const friendObjs = world.bombSpots.filter(b=>b.team==='friendly' && b.active).length;
+        const enemyObjs = world.bombSpots.filter(b=>b.team==='enemy' && b.active).length;
+        if(!friendAlive || friendObjs===0) { state.gameResult={winner:'enemy', reason:'ПОРАЖЕНИЕ'}; setState('GAMEOVER'); cancelAnimationFrame(gameLoopId); return; }
+        if(!enemyAlive || enemyObjs===0) { state.gameResult={winner:'friendly', reason:'ПОБЕДА'}; setState('GAMEOVER'); cancelAnimationFrame(gameLoopId); return; }
+
+        draw();
+        gameLoopId = requestAnimationFrame(update);
+    };
+
+    const draw = () => {
+        ctx.fillStyle = '#c2b280'; ctx.fillRect(0,0,canvas.width, canvas.height);
+        ctx.save();
+
+        const q = state.settings.resolution;
+        const z = state.settings.zoom;
+
+        // Scale 1: Render Scale
+        ctx.scale(q, q);
+        // Scale 2: Zoom (Center scaling is hard with camera translation, so we just scale everything and rely on camera to be positioned correctly relative to zoomed coords)
+        ctx.scale(z, z);
+
+        ctx.translate(-camera.x, -camera.y);
+
+        ctx.strokeStyle = 'rgba(0,0,0,0.1)'; ctx.lineWidth=1;
+        ctx.beginPath();
+        for(let x=0;x<worldWidth;x+=200) { ctx.moveTo(x,0); ctx.lineTo(x,worldHeight); }
+        for(let y=0;y<worldHeight;y+=200) { ctx.moveTo(0,y); ctx.lineTo(worldWidth,y); }
+        ctx.stroke();
+
+        ctx.fillStyle = '#a39472';
+        world.zones.forEach(z => { ctx.fillRect(z.x,z.y,z.w,z.h); });
+
+        [...world.obstacles, ...dynamicObjects].forEach(o => {
+            ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.ellipse(o.x+o.w/2+5, o.y+o.h/2+5, o.w/2, o.h/2, 0, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = o.type==='rock'?'#78716c':'#d6d3d1'; ctx.fillRect(o.x, o.y, o.w, o.h); ctx.strokeStyle = '#555'; ctx.strokeRect(o.x,o.y,o.w,o.h);
+        });
+
+        world.depots.forEach(d => { ctx.fillStyle = d.team==='friendly'?'#3b82f6':'#ef4444'; ctx.fillRect(d.x-20, d.y-20, 40, 40); ctx.fillStyle = '#fff'; ctx.font='20px Arial'; ctx.fillText('📦', d.x-10, d.y+5); });
+
+        world.bombSpots.forEach(b => {
+            if(!b.active) { ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(b.x,b.y,30,0,Math.PI*2); ctx.fill(); }
+            else { ctx.strokeStyle=b.team==='friendly'?'#3b82f6':'#ef4444'; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(b.x,b.y,30,0,Math.PI*2); ctx.stroke(); ctx.font='30px Arial'; ctx.fillStyle='#333'; ctx.fillText(b.team==='friendly'?'🛡️':'⚔️', b.x-15, b.y+10); if(b.timer>0) { ctx.fillStyle='red'; ctx.fillText((b.timer/60).toFixed(1), b.x-20, b.y-40); } }
+        });
+
+        entities.sort((a,b)=>a.y-b.y).forEach(e => {
+            if(e.hp>0) {
+                if(e.hitFlash>0) { ctx.fillStyle='white'; ctx.beginPath(); ctx.arc(e.x,e.y,e.radius,0,Math.PI*2); ctx.fill(); }
+                else {
+                    drawSoldier(ctx, e);
+                    if(e.type==='player') {
+                        const w = e.weapons[e.activeWeaponIdx];
+                        ctx.save();
+                        // Only draw laser if not touch controls to keep clean
+                        const showMobile = state.settings.controls === 'touch' || (state.settings.controls === 'auto' && state.isMobile);
+                        if(!showMobile) {
+                            ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.setLineDash([5,5]); ctx.beginPath(); ctx.arc(e.x,e.y,w.range,0,Math.PI*2); ctx.stroke();
+                        }
+                        ctx.restore();
+                    }
+                }
+            }
+        });
+
+        bullets.forEach(b => { ctx.fillStyle = b.type==='grenade'?'#000':(b.type==='heal'?'#22c55e':'#fbbf24'); ctx.beginPath(); ctx.arc(b.x, b.y, b.type==='grenade'?5:3, 0, Math.PI*2); ctx.fill(); });
+        particles.forEach((p,i) => { p.life-=0.05; if(p.life>0) { if(p.isText) { ctx.fillStyle=p.color; ctx.font='12px Arial'; ctx.fillText(p.isText, p.x, p.y); p.y--; } else { ctx.globalAlpha=p.life; ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.size,0,Math.PI*2); ctx.fill(); ctx.globalAlpha=1; } } else particles.splice(i,1); });
+
+        ctx.restore();
+
+        // Minimap
+        const ms=0.08; const mw=worldWidth*ms; const mh=worldHeight*ms;
+        const mx=canvas.width-mw-20; const my=20;
+        ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.fillRect(mx,my,mw,mh); ctx.strokeStyle='#b8a37e'; ctx.lineWidth=2; ctx.strokeRect(mx,my,mw,mh);
+        ctx.fillStyle = '#9ca3af'; [...world.obstacles, ...dynamicObjects].forEach(o => { ctx.fillRect(mx + o.x*ms, my + o.y*ms, o.w*ms, o.h*ms); });
+        world.bombSpots.forEach(b => { if(b.active) { ctx.fillStyle=b.team==='friendly'?'#3b82f6':'#ef4444'; ctx.fillRect(mx+b.x*ms-3, my+b.y*ms-3, 6, 6); } });
+        world.depots.forEach(d => { ctx.fillStyle = '#facc15'; ctx.fillRect(mx+d.x*ms-2, my+d.y*ms-2, 4, 4); });
+        entities.forEach(e=>{ if(e.hp>0) { ctx.fillStyle=e.type==='player'?'#0f0':(e.team==='friendly'?'#3b82f6':'#f00'); ctx.beginPath(); ctx.arc(mx+e.x*ms, my+e.y*ms, 2, 0, Math.PI*2); ctx.fill(); } });
+    };
+
+    gameLoopId = requestAnimationFrame(update);
+}
+
+function drawSoldier(ctx, e) {
+    ctx.save(); ctx.translate(e.x, e.y);
+    const wpn = e.weapons[e.activeWeaponIdx];
+    if (wpn.isReloading) { ctx.fillStyle = '#333'; ctx.fillRect(-15, -35, 30, 4); ctx.fillStyle = '#ccc'; ctx.fillRect(-15, -35, 30 * (wpn.reloadProgress / (wpn.reload || 120)), 4); }
+    ctx.rotate(e.angle);
+    if(e.shieldActive) { ctx.beginPath(); ctx.arc(0,0,40,-1,1); ctx.strokeStyle='#60a5fa'; ctx.lineWidth=4; ctx.stroke(); }
+    const wlk = (Math.abs(e.x-(e.lx||e.x))+Math.abs(e.y-(e.ly||e.y)))>0.1 ? Math.sin(Date.now()/80)*6 : 0;
+    ctx.fillStyle='#1c1917'; ctx.beginPath(); ctx.ellipse(-6, wlk, 5, 7, 0, 0, Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.ellipse(6, -wlk, 5, 7, 0, 0, Math.PI*2); ctx.fill();
+    const pal = CAMO_PALETTES[e.country.camo] || CAMO_PALETTES.us;
+    ctx.fillStyle=pal[0]; ctx.beginPath(); ctx.arc(0,0,14,0,Math.PI*2); ctx.fill(); ctx.fillStyle='rgba(0,0,0,0.3)'; ctx.beginPath(); ctx.arc(0,0,12,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#bcaaa4'; ctx.beginPath(); ctx.arc(8,12,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#0f172a'; if(wpn.range<300) ctx.fillRect(4,-2,12,4); else if (wpn.type==='grenade') { ctx.fillRect(0,-4,25,8); ctx.fillStyle='#222'; ctx.fillRect(0,-2,25,4); } else ctx.fillRect(0,-3,35,5);
+    ctx.fillStyle='#bcaaa4'; ctx.beginPath(); ctx.arc(4,5,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle=pal[0]; ctx.beginPath(); ctx.arc(0,0,11,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#333'; ctx.beginPath(); ctx.roundRect(4,-5,6,10,2); ctx.fill();
+    if(e.team==='friendly' || e.type==='player') {
+        ctx.rotate(-e.angle); ctx.font='14px Arial'; let icon='';
+        if(e.class==='medic') { ctx.fillStyle='white'; icon='+'; } if(e.class==='miner') { ctx.fillStyle='orange'; icon='💣'; }
+        if(e.class==='builder') { ctx.fillStyle='blue'; icon='⚒'; } if(e.class==='grenadier') { ctx.fillStyle='red'; icon='💥'; }
+        if(e.class==='supplier') { ctx.fillStyle='yellow'; icon='📦'; }
+        if(icon) ctx.fillText(icon, -5, -15);
+        if(e.plantProgress>0) { ctx.fillStyle='white'; ctx.fillRect(-15, 20, 30, 4); ctx.fillStyle='orange'; ctx.fillRect(-15, 20, 30*(e.plantProgress/180), 4); }
+    }
+    ctx.restore();
+}
+
+function generateWorld() {
+    const obstacles = []; const zones = []; const bombSpots = []; const speckles = []; const depots = [];
+    for(let i=0; i<600; i++) speckles.push({x: Math.random()*worldWidth, y: Math.random()*worldHeight, size: Math.random()*4+1, color: Math.random()>0.5?'#26221d':'#3d362b'});
+    zones.push({ x: worldWidth * 0.2, y: worldHeight * 0.45, w: worldWidth * 0.6, h: 80, type: 'trench' });
+    zones.push({ x: worldWidth * 0.1, y: worldHeight * 0.2, w: worldWidth * 0.3, h: 60, type: 'trench' });
+    zones.push({ x: worldWidth * 0.6, y: worldHeight * 0.8, w: worldWidth * 0.3, h: 60, type: 'trench' });
+    const obsCount = state.settings.mapSize==='small'?30 : (state.settings.mapSize==='large'?120:70);
+    for (let i=0; i<obsCount; i++) {
+        let ox, oy, w, h, attempt=0;
+        do { ox = Math.random()*worldWidth; oy = Math.random()*worldHeight; w = 60+Math.random()*40; h = 60+Math.random()*40; attempt++;
+        } while (attempt<10 && ((oy < 400 || oy > worldHeight-400) || (ox > worldWidth*0.2-100 && ox < worldWidth*0.2+100) || (ox > worldWidth*0.8-100 && ox < worldWidth*0.8+100)));
+        obstacles.push({x: ox, y: oy, w, h, type: Math.random()>0.5?'rock':'wall'});
+    }
+    [0.2, 0.4, 0.6, 0.8].forEach((pct, i) => {
+        bombSpots.push({ id: `e${i}`, x: worldWidth*pct, y: 250, team: 'enemy', hp: 100, active: true, timer: 0 });
+        bombSpots.push({ id: `f${i}`, x: worldWidth*pct, y: worldHeight-250, team: 'friendly', hp: 100, active: true, timer: 0 });
+    });
+    depots.push({ id: 'depot_f', x: worldWidth/2+200, y: worldHeight-150, team: 'friendly' });
+    depots.push({ id: 'depot_e', x: worldWidth/2-200, y: 150, team: 'enemy' });
+    return { obstacles, zones, bombSpots, speckles, depots };
+}
+
+window.setNextClass = (id) => { state.nextPlayerClass = CLASSES.find(c=>c.id===id); };
+lucide.createIcons();
+render();
+</script>
+</body>
+</html>

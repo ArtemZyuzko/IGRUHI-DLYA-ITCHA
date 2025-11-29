@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPG Chess: Grandmaster Update</title>
+    <style>
+        :root {
+            --bg-color: #161512;
+            --panel-bg: #262421;
+            --white-cell: #f0d9b5;
+            --black-cell: #b58863;
+            --accent: #ff4757;
+            --ult-ready: #f1c40f;
+            --text-main: #ffffff;
+            --check-color: #e74c3c; /* Красный для шаха */
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* МЕНЮ */
+        #main-menu {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); z-index: 200;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+        }
+        .menu-box {
+            background: var(--panel-bg); padding: 40px; border-radius: 8px;
+            text-align: center; border: 1px solid #444; width: 300px;
+        }
+        select, button { width: 100%; margin-top: 15px; padding: 12px; border-radius: 4px; border: none; font-size: 16px; }
+        select { background: #3c3b39; color: white; border: 1px solid #555; }
+        button.btn-primary { background: #629924; color: white; font-weight: bold; cursor: pointer; text-transform: uppercase; }
+        button.btn-primary:hover { background: #6da828; }
+
+        /* ИГРОВОЙ ЭКРАН */
+        #game-layout {
+            display: none;
+            flex-direction: row;
+            width: 100%; height: 100%;
+            align-items: center; justify-content: center;
+            gap: 20px;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* ДОСКА */
+        #board-container {
+            width: 90vmin; height: 90vmin;
+            max-width: 800px; max-height: 800px;
+            position: relative;
+            flex-shrink: 0;
+            border: 5px solid #333;
+            box-sizing: content-box;
+        }
+
+        #board {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr);
+            width: 100%; height: 100%;
+            background: var(--bg-color);
+        }
+
+        .cell {
+            position: relative;
+            width: 100%; height: 100%;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .cell.white { background-color: var(--white-cell); }
+        .cell.black { background-color: var(--black-cell); }
+
+        /* Стили состояния клеток */
+        .cell.selected { background-color: rgba(20, 85, 30, 0.6) !important; }
+        .cell.last-move { background-color: rgba(155, 199, 0, 0.41) !important; }
+        .cell.check {
+            background: radial-gradient(ellipse at center, rgb(255, 0, 0) 0%, rgba(231, 76, 60, 0.5) 25%, transparent 80%);
+        }
+
+        .cell.possible-move::after {
+            content: ''; position: absolute; width: 22%; height: 22%;
+            background: rgba(0,0,0,0.2); border-radius: 50%; pointer-events: none;
+        }
+        .cell.possible-attack {
+            background: radial-gradient(circle, transparent 20%, rgba(200,0,0,0.5) 25%);
+        }
+        .cell.ult-target {
+            background-color: rgba(142, 68, 173, 0.6) !important;
+            box-shadow: inset 0 0 10px #8e44ad;
+        }
+
+        /* ФИГУРЫ */
+        .piece-container {
+            width: 100%; height: 100%;
+            position: absolute;
+            pointer-events: none; /* События идут на клетку, но мы управляем этим в JS */
+            display: flex; justify-content: center; align-items: center;
+            z-index: 10;
+        }
+        .piece-svg {
+            width: 90%; height: 90%;
+            filter: drop-shadow(0 2px 3px rgba(0,0,0,0.4));
+        }
+        .piece-white { fill: #ffffff; stroke: #000000; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+        .piece-black { fill: #000000; stroke: #ffffff; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+
+        /* При перетаскивании */
+        .piece-dragging {
+            position: fixed;
+            width: 10vmin; height: 10vmin; /* Примерный размер, обновляется JS */
+            max-width: 100px; max-height: 100px;
+            z-index: 1000;
+            pointer-events: none;
+            opacity: 0.9;
+            transform: translate(-50%, -50%); /* Центрирование под курсором */
+        }
+        .piece-ghost {
+            opacity: 0.3;
+        }
+
+        /* ЗАРЯДЫ */
+        .charges {
+            position: absolute; bottom: 2px; right: 2px;
+            display: flex; gap: 2px; z-index: 15;
+            pointer-events: none;
+        }
+        .dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.4);
+        }
+        .dot.active { background: #f1c40f; border-color: transparent; box-shadow: 0 0 4px #f1c40f; }
+
+        /* ИНТЕРФЕЙС */
+        #sidebar {
+            width: 320px;
+            height: 90vmin; max-height: 800px;
+            background: var(--panel-bg);
+            display: flex; flex-direction: column;
+            border-radius: 4px; overflow: hidden;
+            border: 1px solid #333;
+        }
+
+        #history {
+            flex-grow: 1; background: #302e2c; overflow-y: auto;
+            padding: 5px; font-family: monospace; font-size: 13px; color: #ccc;
+        }
+        .hist-line { display: flex; border-bottom: 1px solid #3a3a3a; }
+        .hist-num { width: 30px; background: #262421; color: #666; text-align: center; padding: 4px; }
+        .hist-mv { flex: 1; padding: 4px 8px; }
+
+        #controls { padding: 15px; background: #262421; border-top: 1px solid #444; text-align: center; }
+        .ult-bar-bg { height: 8px; background: #444; border-radius: 4px; margin: 10px 0; overflow: hidden; }
+        .ult-bar-fill { height: 100%; width: 0; background: linear-gradient(90deg, #f1c40f, #e67e22); transition: 0.3s; }
+
+        #btn-ult {
+            background: linear-gradient(45deg, #f39c12, #d35400); color: white;
+            font-weight: bold; padding: 15px; border-radius: 5px; width: 100%;
+            display: none; animation: pulse 1.5s infinite; cursor: pointer;
+        }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+
+        /* SVG Слой для стрелок */
+        #draw-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 20;
+        }
+
+        #drag-proxy {
+            position: absolute; top:0; left:0; width:0; height:0; z-index: 9999;
+        }
+
+        @media (max-width: 800px) {
+            #game-layout { flex-direction: column; }
+            #sidebar { width: 90vmin; height: 150px; }
+            #history { display: none; }
+        }
+    </style>
+</head>
+<body oncontextmenu="return false;">
+
+    <div id="main-menu">
+        <div class="menu-box">
+            <h1 style="color:#eee; margin:0 0 20px;">RPG CHESS</h1>
+            <select id="player-side">
+                <option value="white">Белые</option>
+                <option value="black">Черные</option>
+                <option value="self">Сам с собой</option>
+            </select>
+            <select id="bot-difficulty">
+                <option value="easy">Лёгкий</option>
+                <option value="hard">Сложный</option>
+            </select>
+            <button class="btn-primary" onclick="startGame()">ИГРАТЬ</button>
+        </div>
+    </div>
+
+    <div id="game-layout">
+        <div id="board-container">
+            <div id="board"></div>
+            <svg id="draw-layer"></svg>
+        </div>
+
+        <div id="sidebar">
+            <div style="padding:5px; text-align:center; background:#222; font-size:12px; color:#888;">ИСТОРИЯ</div>
+            <div id="history"></div>
+
+            <div id="controls">
+                <div id="game-status" style="color: #e74c3c; font-weight: bold; margin-bottom: 5px; height: 18px;"></div>
+                <div id="sel-name" style="color:#eee; font-weight:bold; height:20px;">Выберите фигуру</div>
+                <div class="ult-bar-bg"><div id="ult-fill" class="ult-bar-fill"></div></div>
+                <div id="ult-text" style="font-size:11px; color:#888; margin-bottom:10px;"></div>
+
+                <button id="btn-ult" onclick="toggleUlt()">УЛЬТА!</button>
+                <button onclick="location.reload()" style="background:transparent; border:1px solid #555; color:#888; padding:5px; width:100%; margin-top:5px; cursor:pointer;">В МЕНЮ</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="drag-proxy"></div> <!-- Для переноса фигуры -->
+
+    <div id="game-over" style="display:none; position:fixed; top:0;left:0; width:100%;height:100%; background:rgba(0,0,0,0.9); z-index:300; align-items:center; justify-content:center; flex-direction:column;">
+        <h1 id="win-txt" style="color:#f1c40f; font-size:3em;">ПОБЕДА</h1>
+        <button class="btn-primary" style="width:200px" onclick="location.reload()">МЕНЮ</button>
+    </div>
+
+    <script>
+        // --- SVG ГРАФИКА (Обновленная) ---
+        const SVGS = {
+            // Пешка
+            p: '<path d="M45 64c-2.5 0-4.8-.4-6.8-1.2-2-.8-3.7-1.9-5-3.3-1.4-1.4-2.4-3-3-4.8-.6-1.8-1-3.8-1-5.9 0-3.1 1-6 2.8-8.6 1.9-2.6 4.4-4.7 7.5-6.3l-1.6-4c-.9-2.3-1.4-4.6-1.4-6.9 0-2.9.8-5.5 2.5-7.7 1.7-2.2 4-3.3 6.9-3.3 2.9 0 5.2 1.1 6.9 3.3 1.7 2.2 2.5 4.8 2.5 7.7 0 2.3-.5 4.6-1.4 6.9l-1.6 4c3.1 1.6 5.6 3.7 7.5 6.3 1.9 2.6 2.8 5.5 2.8 8.6 0 2.1-.3 4.1-1 5.9-.6 1.8-1.7 3.4-3 4.8-1.4 1.4-3 2.5-5 3.3-2 .8-4.3 1.2-6.8 1.2zm-12.2 6.5l.8-3.4c2.8 1.2 6.5 1.8 11.3 1.8 4.8 0 8.6-.6 11.3-1.8l.8 3.4c-3.6 1.5-7.7 2.3-12.2 2.3-4.4 0-8.5-.8-12-2.3z" transform="translate(0, 5)"/>',
+            // Ладья
+            r: '<g transform="translate(0, 5)"><path d="M22 65h56v10H22z"/><path d="M27 65v-20h46v20"/><path d="M37 45v-10h26v10"/><path d="M32 35v-25h8v5h5v-5h10v5h5v-5h8v25"/></g>',
+            // Конь (Перерисован - Классический)
+            n: '<g transform="translate(0, 5)"><path d="M35 12c0-5 5-9 11-9 14 0 23 9 23 23 0 7-5 14-11 19-5 3-9 5-17 5-5 0-11-3-11-9 0-7 4-11 11-14 5-2 7-5 7-9 0-3-2-5-5-5-3 0-5 2-5 5h-3z"/><path d="M22 75h55c.5-5 2-8 5-11-5-3-11-5-18-5H28v16z"/><circle cx="60" cy="24" r="2.5"/></g>',
+            // Слон (Перерисован)
+            b: '<g transform="translate(0, 5)"><path d="M27 75h46v-8H27z"/><path d="M37 67l5-32 8-10 8 10 5 32M50 15l-4 8h8z"/><path d="M50 35v5M50 45v5"/><path d="M45 25h10"/></g>',
+            // Ферзь
+            q: '<g transform="translate(0, 5)"><path d="M17 75h66v-8H17z"/><path d="M22 67l8-25-10-25 2-4 15 10 13-15 13 15 15-10 2 4-10 25 8 25"/><circle cx="50" cy="20" r="3"/><circle cx="20" cy="13" r="3"/><circle cx="80" cy="13" r="3"/></g>',
+            // Король
+            k: '<g transform="translate(0, 5)"><path d="M22 80h56v-10H22z"/><path d="M27 70l8-30h30l8 30"/><path d="M50 10v30M35 25h30"/><path d="M40 40h20l-5-15h-10z"/></g>'
+        };
+
+        // --- ГЛОБАЛЬНОЕ СОСТОЯНИЕ ---
+        let board = [], turn = 'white', side = 'white', diff = 'easy', sel = null, moves = [], isUlt = false, mCount = 1;
+        let dragging = null; // {r, c, el, ghost}
+        let drawings = { a: [], c: [] }, rClickStart = null;
+        let isGameOver = false;
+
+        function startGame() {
+            side = document.getElementById('player-side').value;
+            diff = document.getElementById('bot-difficulty').value;
+            document.getElementById('main-menu').style.display = 'none';
+            document.getElementById('game-layout').style.display = 'flex';
+
+            initBoard(); initEvents(); render();
+            // Запускаем бота только если игрок выбрал черный цвет, и это не режим "Сам с собой"
+            if(side === 'black' && side !== 'self') setTimeout(bot, 800);
+        }
+
+        function initBoard() {
+            board = Array(8).fill(null).map(() => Array(8).fill(null));
+            const row = (r, c, t) => t.forEach((tp, i) => board[r][i] = {t: tp, c: c, k: 0});
+            const back = ['r','n','b','q','k','b','n','r'];
+            row(0, 'black', back); row(1, 'black', Array(8).fill('p'));
+            row(6, 'white', Array(8).fill('p')); row(7, 'white', back);
+            checkGameStatus();
+        }
+
+        function render() {
+            const el = document.getElementById('board');
+            // Не перерисовываем всё во время драга, чтобы не сбивать анимацию,
+            // но нам нужно обновлять подсветку.
+            // Для упрощения: полная перерисовка, но если dragging, то скрываем фигуру на доске
+            el.innerHTML = '';
+
+            // Определяем, находится ли король под шахом
+            const inCheck = isCheck(turn);
+
+            for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
+                const cell = document.createElement('div');
+                cell.className = `cell ${(r+c)%2 ? 'black' : 'white'}`;
+                cell.dataset.r = r; cell.dataset.c = c;
+
+                const p = board[r][c];
+                const mv = moves.find(m => m.r === r && m.c === c);
+
+                // Подсветка
+                if(mv) {
+                    if(isUlt) cell.classList.add('ult-target');
+                    else if(p && p.c !== turn) cell.classList.add('possible-attack');
+                    else cell.classList.add('possible-move');
+                }
+                if(sel && sel.r === r && sel.c === c) cell.classList.add('selected');
+
+                // Подсветка шаха
+                if(p && p.t === 'k' && p.c === turn && inCheck) {
+                    cell.classList.add('check');
+                }
+
+                // Рисование фигур
+                if(p) {
+                    const isDragged = dragging && dragging.r === r && dragging.c === c;
+                    const container = document.createElement('div');
+                    container.className = `piece-container ${isDragged ? 'piece-ghost' : ''}`;
+                    container.innerHTML = getPieceHTML(p);
+                    cell.appendChild(container);
+                }
+
+                // Маркеры (ПКМ)
+                if(drawings.c.some(x => x.r===r && x.c===c)) {
+                    cell.innerHTML += `<div style="position:absolute;width:80%;height:80%;border:4px solid rgba(21,120,27,0.5);border-radius:50%;pointer-events:none;"></div>`;
+                }
+
+                // Обработчики мыши (только если не перетаскиваем сейчас глобально)
+                cell.onmousedown = (e) => handleMouseDown(e, r, c);
+                el.appendChild(cell);
+            }
+            drawArrows();
+        }
+
+        function getPieceHTML(p) {
+            let html = `<svg viewBox="0 0 100 100" class="piece-svg piece-${p.c}">${SVGS[p.t]}</svg>`;
+            let dots = '';
+            for(let i=0; i<3; i++) dots += `<div class="dot ${i<p.k ? 'active' : ''}"></div>`;
+            html += `<div class="charges">${dots}</div>`;
+            return html;
+        }
+
+        function drawArrows() {
+            const s = document.getElementById('draw-layer'); s.innerHTML = '';
+            s.innerHTML = `<defs><marker id="ah" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto"><path d="M0 0 L6 3 L0 6" fill="rgba(21,120,27,0.8)"/></marker></defs>`;
+            drawings.a.forEach(a => {
+                const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                const c1 = (a.fc * 12.5 + 6.25) + '%', r1 = (a.fr * 12.5 + 6.25) + '%';
+                const c2 = (a.tc * 12.5 + 6.25) + '%', r2 = (a.tr * 12.5 + 6.25) + '%';
+                l.setAttribute("x1",c1); l.setAttribute("y1",r1); l.setAttribute("x2",c2); l.setAttribute("y2",r2);
+                l.setAttribute("stroke", "rgba(21,120,27,0.8)"); l.setAttribute("stroke-width", "1.5%");
+                l.setAttribute("marker-end", "url(#ah)");
+                s.appendChild(l);
+            });
+        }
+
+        // --- ДРАГ-Н-ДРОП И СОБЫТИЯ ---
+        function initEvents() {
+            const b = document.body;
+            b.onmousemove = handleMouseMove;
+            b.onmouseup = handleMouseUp;
+            // ПКМ
+            const boardEl = document.getElementById('board');
+            boardEl.onmousedown = (e) => {
+                if(e.button === 2) {
+                    const c = e.target.closest('.cell');
+                    if(c) rClickStart = {r:+c.dataset.r, c:+c.dataset.c};
+                }
+            };
+            boardEl.onmouseup = (e) => {
+                if(e.button === 2 && rClickStart) {
+                    const c = e.target.closest('.cell');
+                    if(c) {
+                        const r=+c.dataset.r, col=+c.dataset.c;
+                        if(r===rClickStart.r && col===rClickStart.c) {
+                            const idx = drawings.c.findIndex(x=>x.r===r && x.c===col);
+                            if(idx>=0) drawings.c.splice(idx,1); else drawings.c.push({r,c:col});
+                        } else {
+                            drawings.a.push({fr:rClickStart.r, fc:rClickStart.c, tr:r, tc:col});
+                        }
+                        render();
+                    }
+                    rClickStart = null;
+                }
+            };
+        }
+
+        function handleMouseDown(e, r, c) {
+            if(e.button !== 0) return; // Только ЛКМ
+            // В режиме "Сам с собой" (self) можно ходить за любую сторону, чей сейчас ход
+            if (side !== 'self' && turn !== side) return;
+            if(isGameOver) return;
+
+            // Очистка стрелок
+            if(drawings.a.length > 0 || drawings.c.length > 0) {
+                drawings = {a:[], c:[]};
+                render();
+            }
+
+            const p = board[r][c];
+            // Если клик по возможной клетке хода
+            const mv = moves.find(m => m.r === r && m.c === c);
+            if(mv) {
+                doMove(mv);
+                return;
+            }
+
+            // Если клик по своей фигуре -> Начало перетаскивания и выбора
+            if(p && p.c === turn) {
+                select(r, c);
+
+                // Создаем элемент для драга
+                const proxy = document.getElementById('drag-proxy');
+                proxy.innerHTML = getPieceHTML(p);
+                proxy.className = 'piece-dragging';
+                proxy.style.display = 'block';
+                updateDragPos(e.clientX, e.clientY);
+
+                dragging = {r, c, el: proxy};
+                render(); // Чтобы сделать фигуру на доске полупрозрачной
+            } else {
+                deselect();
+            }
+        }
+
+        function handleMouseMove(e) {
+            if(dragging) {
+                updateDragPos(e.clientX, e.clientY);
+            }
+        }
+
+        function updateDragPos(x, y) {
+            const proxy = document.getElementById('drag-proxy');
+            proxy.style.left = x + 'px';
+            proxy.style.top = y + 'px';
+        }
+
+        function handleMouseUp(e) {
+            if(!dragging) return;
+
+            // Скрываем прокси
+            const proxy = document.getElementById('drag-proxy');
+            proxy.style.display = 'none';
+
+            // Находим клетку под курсором
+            const boardEl = document.getElementById('board');
+            const rect = boardEl.getBoundingClientRect();
+            const cellSize = rect.width / 8;
+
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            const c = Math.floor(x / cellSize);
+            const r = Math.floor(y / cellSize);
+
+            // Если попали в доску
+            if(c >= 0 && c < 8 && r >= 0 && r < 8) {
+                const mv = moves.find(m => m.r === r && m.c === c);
+                if(mv) {
+                    doMove(mv);
+                }
+            }
+
+            dragging = null;
+            render();
+        }
+
+
+        // --- ЛОГИКА ИГРЫ ---
+        function select(r, c) {
+            sel = {r, c}; isUlt = false;
+            moves = getLegalMoves(r, c, false);
+            updateUI();
+        }
+
+        function deselect() {
+            sel = null; moves = []; isUlt = false;
+            updateUI(); render();
+        }
+
+        function toggleUlt() {
+            if(!sel) return;
+            isUlt = !isUlt;
+            moves = getLegalMoves(sel.r, sel.c, isUlt);
+            updateUI(); render();
+        }
+
+        function doMove(m) {
+            const p = board[sel.r][sel.c];
+            const t = board[m.r][m.c];
+
+            logMove(p, {r:sel.r, c:sel.c}, m, t);
+
+            if(m.isUlt) {
+                p.k = 0;
+                applyUlt(p, m);
+            } else {
+                // Новая логика очков
+                let points = 0;
+                if(t) {
+                    if(t.t === 'p') points = 1;
+                    else if(t.t === 'n') points = 2;
+                    else points = 3; // b, r, q, k
+                }
+
+                if(points > 0) p.k = Math.min(3, p.k + points);
+
+                board[m.r][m.c] = p;
+                board[sel.r][sel.c] = null;
+
+                // Превращение пешки
+                if(p.t === 'p' && (m.r===0 || m.r===7)) p.t = 'q';
+            }
+
+            // Победа королем
+            if(t && t.t === 'k') {
+                return endGame(p.c);
+            }
+
+            deselect();
+            turn = turn==='white'?'black':'white';
+
+            checkGameStatus();
+            render();
+
+            // Бот ходит только если игра не окончена, сейчас не ход игрока, и это не режим "Сам с собой"
+            if(!isGameOver && side !== 'self' && turn !== side) setTimeout(bot, 600);
+        }
+
+        function applyUlt(p, m) {
+            if(p.t==='p') p.t='q';
+            else if(p.t==='n') { board[m.r][m.c]=p; board[sel.r][sel.c]=null; }
+            else if(p.t==='k') board[m.r][m.c] = {t:'p', c:p.c, k:0};
+            else board[m.r][m.c] = null; // выстрел
+        }
+
+        // --- ШАХМАТНЫЕ ПРАВИЛА (ШАХ, МАТ, ПАТ) ---
+
+        // Проверка: находится ли король цвета `color` под атакой
+        function isCheck(color) {
+            // Найти короля
+            let kR, kC;
+            for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
+                if(board[r][c] && board[r][c].t === 'k' && board[r][c].c === color) {
+                    kR = r; kC = c; break;
+                }
+            }
+            if(kR === undefined) return true; // Короля съели (в этой версии возможно ультой)
+
+            // Пройтись по всем врагам и проверить, бьют ли они короля
+            const enemy = color === 'white' ? 'black' : 'white';
+            for(let r=0; r<8; r++) for(let c=0; c<8; c++) {
+                const p = board[r][c];
+                if(p && p.c === enemy) {
+                    // Получаем псевдо-ходы врага (только атаки)
+                    // Важно: здесь мы не проверяем легальность ходов врага (рекурсия),
+                    // просто "может ли фигура сюда ударить"
+                    const attacks = getPseudoMoves(r, c, false);
+                    if(attacks.some(m => m.r === kR && m.c === kC)) return true;
+                }
+            }
+            return false;
+        }
+
+        // Получить ТОЛЬКО легальные ходы (нельзя ставить короля под удар)
+        function getLegalMoves(r, c, ult) {
+            const pseudo = getPseudoMoves(r, c, ult);
+            const p = board[r][c];
+            if(!p) return [];
+
+            // Если это ульта - обычно это спец-эффект.
+            // Для упрощения: ульта разрешена всегда, если она не перемещает короля под удар.
+            // Большинство ульт не двигают короля, кроме прыжка коня или превращения пешки.
+            // Но мы проверим всё.
+
+            return pseudo.filter(m => {
+                // Симулируем ход
+                const savedSource = board[r][c];
+                const savedTarget = board[m.r][m.c];
+
+                // Применяем изменения временно
+                if(m.isUlt) {
+                    // Сложная логика симуляции ульты.
+                    // Для ульты мы, как правило, игнорируем правило "нельзя оставлять короля под шахом",
+                    // если ульта убивает угрозу.
+                    // НО! В этой реализации ульта меняет board.
+                    // Простая эвристика: Ульта разрешена, если после неё король жив.
+                    // Упрощение: пока не будем жестко валидировать шахи ПОСЛЕ ульты,
+                    // так как это может сломать веселье RPG.
+                    // Но для обычных ходов - ОБЯЗАТЕЛЬНО.
+                    return true;
+                } else {
+                    board[m.r][m.c] = savedSource;
+                    board[r][c] = null;
+
+                    const stillCheck = isCheck(p.c);
+
+                    // Откат
+                    board[r][c] = savedSource;
+                    board[m.r][m.c] = savedTarget;
+
+                    return !stillCheck;
+                }
+            });
+        }
+
+        // Базовая логика ходов (без проверки на шах)
+        function getPseudoMoves(r, c, ult) {
+            const p = board[r][c];
+            let res = [];
+            const inB = (x,y) => x>=0&&x<8&&y>=0&&y<8;
+            const push = (tr, tc, isU) => res.push({r:tr, c:tc, isUlt:isU});
+
+            const slide = (dirs) => {
+                dirs.forEach(([dr,dc]) => {
+                    let i=r+dr, j=c+dc;
+                    while(inB(i,j)) {
+                        const t = board[i][j];
+                        if(ult) {
+                             // Ульта пробивает (ферзь, слон, ладья)
+                             // Стреляем по врагам
+                             if(t && t.c !== p.c) push(i,j,true);
+                             // Ферзь глобал
+                             if(p.t==='q' && t && t.c!==p.c) push(i,j,true);
+                        } else {
+                            if(!t) push(i,j,false);
+                            else { if(t.c!==p.c) push(i,j,false); break; }
+                        }
+                        i+=dr; j+=dc;
+                    }
+                });
+            };
+
+            if(ult) {
+                if(p.t==='p') push(r,c,true);
+                else if(p.t==='n') {
+                    for(let i=0;i<8;i++) for(let j=0;j<8;j++)
+                        if((Math.abs(i-r)+Math.abs(j-c))<=3 && (!board[i][j] || board[i][j].c!==p.c)) push(i,j,true);
+                }
+                else if(p.t==='q') { // Глобал
+                     for(let i=0;i<8;i++) for(let j=0;j<8;j++) if(board[i][j] && board[i][j].c!==p.c) push(i,j,true);
+                }
+                else if(p.t==='b' || p.t==='r') {
+                    const dirs = p.t==='r' ? [[0,1],[0,-1],[1,0],[-1,0]] : [[1,1],[1,-1],[-1,1],[-1,-1]];
+                    slide(dirs);
+                }
+                else if(p.t==='k') {
+                    for(let i=r-1;i<=r+1;i++) for(let j=c-1;j<=c+1;j++) if(inB(i,j) && !board[i][j]) push(i,j,true);
+                }
+            } else {
+                if(p.t==='p') {
+                    const d = p.c==='white'?-1:1;
+                    // Ход
+                    if(inB(r+d,c) && !board[r+d][c]) {
+                        push(r+d,c,false);
+                        if(((p.c==='white'&&r===6)||(p.c==='black'&&r===1)) && !board[r+d*2][c]) push(r+d*2,c,false);
+                    }
+                    // Атака
+                    [[d,1],[d,-1]].forEach(([dr,dc]) => {
+                        if(inB(r+dr,c+dc) && board[r+dr][c+dc] && board[r+dr][c+dc].c!==p.c) push(r+dr,c+dc,false);
+                    });
+                }
+                else if(['r','b','q'].includes(p.t)) {
+                    slide(p.t==='r'?[[0,1],[0,-1],[1,0],[-1,0]]:(p.t==='b'?[[1,1],[1,-1],[-1,1],[-1,-1]]:[[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]]));
+                }
+                else { // n, k
+                    const dirs = p.t==='n' ? [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[1,-2],[-1,2],[-1,-2]] : [[0,1],[0,-1],[1,0],[-1,0],[1,1],[1,-1],[-1,1],[-1,-1]];
+                    dirs.forEach(([dr,dc]) => {
+                        if(inB(r+dr,c+dc) && (!board[r+dr][c+dc] || board[r+dr][c+dc].c!==p.c)) push(r+dr,c+dc,false);
+                    });
+                }
+            }
+            return res;
+        }
+
+        // Проверка статуса игры (Мат/Пат)
+        function checkGameStatus() {
+            // Есть ли у текущего игрока хоть один легальный ход?
+            let hasMoves = false;
+            for(let r=0; r<8; r++) {
+                for(let c=0; c<8; c++) {
+                    if(board[r][c] && board[r][c].c === turn) {
+                        const mvs = getLegalMoves(r, c, false);
+                        if(mvs.length > 0) { hasMoves = true; break; }
+                        // Проверка ульты
+                        if(board[r][c].k >= 3) {
+                             const umvs = getLegalMoves(r, c, true);
+                             if(umvs.length > 0) { hasMoves = true; break; }
+                        }
+                    }
+                }
+                if(hasMoves) break;
+            }
+
+            const inCheck = isCheck(turn);
+            const statusEl = document.getElementById('game-status');
+
+            if(!hasMoves) {
+                if(inCheck) {
+                    statusEl.innerText = `МАТ! ПОБЕДА ${turn==='white'?'ЧЕРНЫХ':'БЕЛЫХ'}`;
+                    endGame(turn==='white'?'black':'white');
+                } else {
+                    statusEl.innerText = "ПАТ! НИЧЬЯ";
+                    isGameOver = true;
+                }
+            } else if(inCheck) {
+                statusEl.innerText = "ШАХ!";
+            } else {
+                statusEl.innerText = "";
+            }
+        }
+
+        // --- БОТ ---
+        function bot() {
+            if(isGameOver || turn !== (side==='white'?'black':'white')) return;
+            let pcs = [];
+            for(let r=0;r<8;r++) for(let c=0;c<8;c++) if(board[r][c] && board[r][c].c===turn) pcs.push({r,c,p:board[r][c]});
+
+            let opts = [];
+            pcs.forEach(x => {
+                getLegalMoves(x.r, x.c, false).forEach(m => opts.push({f:x, t:m, sc: evalM(m, false)}));
+                if(x.p.k>=3) getLegalMoves(x.r, x.c, true).forEach(m => opts.push({f:x, t:m, sc: evalM(m, true)}));
+            });
+
+            if(!opts.length) return; // Пат/Мат уже обработан
+            opts.sort((a,b) => b.sc - a.sc);
+            const best = (diff==='easy' && opts.length>2 && Math.random()>0.5) ? opts[1] : opts[0];
+
+            sel = {r: best.f.r, c: best.f.c};
+            doMove(best.t);
+        }
+
+        function evalM(m, ult) {
+            let s = Math.random()*5;
+            const tr = board[m.r][m.c];
+            const v = {p:10,n:30,b:30,r:50,q:90,k:999};
+            if(tr) s += v[tr.t];
+            if(ult) s += 40;
+            return s;
+        }
+
+        // --- UI ---
+        function updateUI() {
+            const n = document.getElementById('sel-name');
+            const txt = document.getElementById('ult-text');
+            const bar = document.getElementById('ult-fill');
+            const btn = document.getElementById('btn-ult');
+            const map = {p:'Пешка',n:'Конь',b:'Слон',r:'Ладья',q:'Ферзь',k:'Король'};
+
+            if(sel) {
+                const p = board[sel.r][sel.c];
+                n.innerText = map[p.t];
+                bar.style.width = (p.k/3)*100 + '%';
+                txt.innerText = p.k>=3 ? 'УЛЬТА ГОТОВА' : `${p.k}/3`;
+
+                // --- ИСПРАВЛЕННАЯ ЛОГИКА ---
+                // Кнопка показывается, если есть заряды И сейчас ход этой фигуры.
+                // В режиме "self" (Сам с собой) игрок контролирует любую сторону.
+                // В обычном режиме - только свою.
+
+                const isMyTurn = (side === 'self') || (side === turn);
+                const isMyPiece = (side === 'self') || (side === p.c);
+
+                if(p.k >= 3 && isMyTurn && isMyPiece) {
+                    btn.style.display = 'block';
+                    btn.innerText = isUlt ? 'ОТМЕНА' : 'УЛЬТА!';
+                    btn.style.background = isUlt ? '#e74c3c' : '';
+                } else {
+                    btn.style.display = 'none';
+                }
+            } else {
+                n.innerText = '...'; bar.style.width = 0; txt.innerText = ''; btn.style.display = 'none';
+            }
+        }
+
+        function logMove(p, f, t, cap) {
+            const h = document.getElementById('history');
+            const cols='abcdefgh', rows='87654321';
+            const not = (p.t==='p'?'':p.t.toUpperCase()) + (cap?'x':'') + cols[t.c] + rows[t.r] + (isCheck(turn==='white'?'black':'white')?'+':'');
+
+            if(turn==='white') {
+                h.innerHTML += `<div class="hist-line"><div class="hist-num">${mCount}.</div><div class="hist-mv">${not}</div></div>`;
+            } else {
+                const lines = h.getElementsByClassName('hist-line');
+                const last = lines[lines.length-1];
+                if(last) last.innerHTML += `<div class="hist-mv">${not}</div>`;
+                mCount++;
+            }
+            h.scrollTop = h.scrollHeight;
+        }
+
+        function endGame(c) {
+            isGameOver = true;
+            document.getElementById('game-over').style.display = 'flex';
+            document.getElementById('win-txt').innerText = c==='white'?'ПОБЕДА БЕЛЫХ':'ПОБЕДА ЧЕРНЫХ';
+        }
+    </script>
+</body>
+</html>
